@@ -9,9 +9,9 @@ import seaborn as sns
 
 def signal_unit(s):
     # return the SI unit for a signal name
-    if s.startswith('acc'):
+    if s.startswith('accelerometer'):
         return 'm/s^2'
-    elif s.startswith('gyro'):
+    elif s.startswith('gyroscope'):
         return 'rad/s'
     elif 'angle' in s:
         return 'rad'
@@ -68,11 +68,11 @@ def convert_record(record, calibration_dict):
 
     for name in names[1:]:
         if name.startswith('acc'):
-            newname = name[:4]
+            newname = 'accelerometer ' + name[3]
         elif name.startswith('gyro'):
-            newname = name[:5]
+            newname = 'gyroscope ' + name[4]
         elif name == 'steerangle_lsb':
-            newname = 'steer_angle'
+            newname = 'steer angle'
         elif name == 'speed_lsb':
             newname = 'speed'
         else:

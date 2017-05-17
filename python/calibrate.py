@@ -65,21 +65,30 @@ def calibrate_imu(path, config):
     r = load_file(filename[0])
     N = len(r) # number of samples
     names = r.dtype.names[3:]
-    signals = ['accx', 'accy', 'accz', 'gyrox', 'gyroy', 'gyroz']
-    assert len(names) == len(signals)
+    signals = ('accelerometer x',
+               'accelerometer y',
+               'accelerometer z',
+               'gyroscope x',
+               'gyroscope y',
+               'gyroscope z')
+    assert names == ('accx_g',
+                     'accy_g',
+                     'accz_g',
+                     'gyrox_degs',
+                     'gyroy_degs',
+                     'gyroz_degs')
     for s, n in zip(signals, names):
-        assert n.startswith(s) # name is '{signal}_g' or '{signal}_degs'
-        if s == 'accz':
+        if n == 'accz_g':
             expected = 1 # in g
         else:
             expected = 0 # in g or deg/s
-        if s.startswith('acc'):
+        if n.startswith('acc'):
             unit_factor = 9.81 # 1 g in m/s^2
         else:
             unit_factor = np.pi/180 # 1 deg/s in rad/s
 
         p0 = np.polyfit([expected] * N, r[n], 0)[0] # zero/1g offset
-        if s == 'accz':
+        if s == 'accz_g':
             expected_values = [p0 - 1, p0]
         else:
             expected_values = [p0, p0 + 1]
@@ -110,7 +119,7 @@ def calibrate_steer_angle(path, config):
         assert len(data) > CALIBRATION_STEER_SAMPLE_LENGTH
         steer_dac.append(np.mean(data[-CALIBRATION_STEER_SAMPLE_LENGTH:]))
     p = np.polyfit(steer_dac, steer_rad, 1) # use linear fit
-    config['steer_angle'] = p
+    config['steer angle'] = p
 
 
 def calibrate_speed(path, config):
