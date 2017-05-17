@@ -3,7 +3,11 @@
 import os
 import sys
 import numpy as np
+import scipy.signal
+import scipy.fftpack
+import matplotlib.lines
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 
 
@@ -20,11 +24,17 @@ def signal_unit(s):
     else:
         raise ValueError('unit for signal {} is not defined'.format(s))
 
+def check_valid_record(record):
+    # check that record dtype doesn't contain nested dtypes
+    assert all(np.issubdtype(record.dtype[i], np.number)
+               for i in range(len(record.dtype)))
 
-def get_subplot_grid(record):
     # time is the first field
     assert record.dtype.names[0] == 'time'
 
+
+def get_subplot_grid(record):
+    check_valid_record(record)
     n = len(record.dtype.names) - 1
     cols = 3 if not n % 3 else 2
     rows = int(np.ceil(n / cols))
@@ -32,9 +42,7 @@ def get_subplot_grid(record):
 
 
 def plot_timeseries(record):
-    # check that record dtype doesn't contain nested dtypes
-    assert all(np.issubdtype(record.dtype[i], np.number)
-               for i in range(len(record.dtype)))
+    check_valid_record(record)
 
     names = record.dtype.names
     t = record[names[0]]
@@ -49,6 +57,80 @@ def plot_timeseries(record):
         ax.set_ylabel(signal_unit(signal))
         ax.legend()
 
+    return fig, axes
+
+
+def fft(x, sample_period, window_type=None):
+    if window_type is None:
+        window_type = scipy.signal.hamming
+    n = len(x)
+    windowed_x = np.multiply(x, window_type(n))
+
+    # only use first half of fft since real signals are mirrored about nyquist
+    # frequency
+    xf = 2/n * np.abs(scipy.fftpack.fft(windowed_x)[:n//2])
+    freq = np.linspace(0, 1/(2*sample_period), n/2)
+    return freq, xf
+
+
+def rolling_fft(x, sample_period,
+                window_start_indices, window_length, window_type=None):
+    X = []
+    for i in window_start_indices:
+        freq, xf = fft(x[i:i + window_length], sample_period, window_type)
+        X.append(xf)
+    return freq, window_start_indices, X
+
+
+def plot_stft(record, window_time_duration=1, subplot_grid=True):
+    # window time duration: in seconds, larger value gives higher frequency
+    # resolution
+    check_valid_record(record)
+
+    names = record.dtype.names
+    t = record.time
+    signals = names[1:]
+    colors = sns.color_palette('husl', len(signals))
+
+    sample_period = np.diff(t).mean()
+    window_length = int(window_time_duration/sample_period)
+    window_start_indices = range(0,
+                                 len(t)//window_length * window_length,
+                                 window_length)
+
+    window_start_string = 'range(0, t[-1]//N*N, N), N = {} sec'.format(
+            window_time_duration)
+    figure_title = 'STFT, {} sec time window at times {}'.format(
+            window_time_duration, window_start_string)
+
+    if subplot_grid:
+        rows, cols = get_subplot_grid(record)
+        fig = plt.figure()
+    else:
+        fig = [plt.figure() for _ in signals]
+    axes = []
+
+    for i, (signal, color) in enumerate(zip(signals, colors)):
+        if subplot_grid:
+            ax = fig.add_subplot(rows, cols, i + 1, projection='3d')
+            fig.suptitle(figure_title)
+        else:
+            ax = fig[i].add_subplot(1, 1, 1, projection='3d')
+            fig[i].suptitle(figure_title)
+        start_times = t[window_start_indices]
+        frequencies, _, amplitudes = rolling_fft(r[signal], sample_period,
+                                                 window_start_indices,
+                                                 window_length)
+        X, Y = np.meshgrid(frequencies, start_times)
+        Z = np.reshape(amplitudes, X.shape)
+        ax.plot_surface(X, Y, Z,
+                        rcount=len(frequencies), ccount=len(start_times),
+                        color=color)
+        ax.set_xlabel('frequency [Hz]')
+        ax.set_ylabel('time [s]')
+        proxy = matplotlib.lines.Line2D([], [], color=color)
+        ax.legend([proxy], [signal])
+        axes.append(ax)
     return fig, axes
 
 
@@ -80,7 +162,7 @@ def convert_record(record, calibration_dict):
                 'conversion for signal {} is not defined'.format(name))
         # conversion assumes linear relationship incorporates both calibration
         # and unit conversion
-        record[name] = np.polyval(calibration_dict['convbike'][newname],
+        record[name] = np.polyval(calibration_dict[newname],
                                   record[name])
         newnames.append(newname)
 
@@ -109,7 +191,17 @@ if __name__ == '__main__':
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
 
-    convert_record(r, cd)
+    convert_record(r, cd['convbike'])
     fig, axes = plot_timeseries(r)
     fig.suptitle(path)
+
+    prepend_path = lambda f, p: f.suptitle(
+            '{}\n{}'.format(path, f._suptitle.get_text()))
+    fig2, axes2 = plot_stft(r, subplot_grid=True)
+    try:
+        for f in fig2:
+            prepend_path(f, path)
+    except TypeError:
+        prepend_path(fig2, path)
+
     plt.show()
