@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import numpy as np
+import h5py
 
 
 def load_file(filename, calibration_dict=None):
@@ -8,8 +9,8 @@ def load_file(filename, calibration_dict=None):
         data = load_etrike(filename)
         return convert_etrike(data, calibration_dict)
     elif filename.endswith('.h5'):
-        data = load_cain(filename)
-        return convert_cain(data)
+        data = load_imuwnet(filename)
+        return convert_imuwnet(data)
 
 
 def load_etrike(filename):
@@ -51,3 +52,36 @@ def convert_etrike(record, calibration_dict):
 
     record.dtype.names = newnames
     return record
+
+
+def load_imuwnet(filename):
+    """ Data from Cain, 2016, Measurement of bicycle and rider kinematics during
+    real-world cycling using a wireless array of inertial sensors.
+    """
+    return h5py.File(filename, 'r')
+
+
+def convert_imuwnet(data):
+    # frame data corresponds to imu SI-002767
+    dataset = data['SI-002767']
+    acc = dataset['Calibrated/Accelerometers'].value
+    gyro = dataset['Calibrated/Gyroscopes'].value
+    t = dataset['Time'].value.flatten()
+    t -= t[0] # redefine first sample to be at time zero
+    t = t.astype(np.float) # convert from unsigned integer to floating type
+    t /= 1000000 # convert microseconds to seconds
+
+    names = ['time',
+             'accelerometer x',
+             'accelerometer y',
+             'accelerometer z',
+             'gyroscope x',
+             'gyroscope y',
+             'gyroscope z']
+
+    split = lambda x: [y.flatten() for y in np.split(x, 3, axis=1)]
+    r = np.core.records.fromarrays(
+            #[t] + np.split(acc, 3, axis=1) + np.split(gyro, 3, axis=1),
+            [t] + split(acc) + split(gyro),
+            names=names)
+    return r

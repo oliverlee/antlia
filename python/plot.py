@@ -36,7 +36,7 @@ def check_valid_record(record):
 def get_subplot_grid(record):
     check_valid_record(record)
     n = len(record.dtype.names) - 1
-    cols = 3 if not n % 3 else 2
+    cols = 3 if (not n % 3) and (n > 6) else 2
     rows = int(np.ceil(n / cols))
     return rows, cols
 
@@ -148,18 +148,31 @@ if __name__ == '__main__':
         path = filenames[3]
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
-    r = record.load_file(path, cd['convbike'])
+    r2 = record.load_file(path, cd['convbike'])
 
-    fig, axes = plot_timeseries(r)
+    # fig, axes = plot_timeseries(r)
+    # fig.suptitle(path)
+
+    # prepend_path = lambda f, p: f.suptitle(
+    #         '{}\n{}'.format(path, f._suptitle.get_text()))
+    # fig2, axes2 = plot_stft(r, subplot_grid=True)
+    # try:
+    #     for f in fig2:
+    #         prepend_path(f, path)
+    # except TypeError:
+    #     prepend_path(fig2, path)
+
+    path = os.path.join(os.path.dirname(__file__),
+                        '../data/20160107-113037_sensor_data.h5')
+    r = record.load_file(path)
+
+    # get slice of data since it is HUGE
+    t = r.time
+    i0 = np.argmax(t >= 500)
+    i1 = np.argmax(t >= 540)
+    fig, axes = plot_timeseries(r[i0:i1])
     fig.suptitle(path)
 
-    prepend_path = lambda f, p: f.suptitle(
-            '{}\n{}'.format(path, f._suptitle.get_text()))
     fig2, axes2 = plot_stft(r, subplot_grid=True)
-    try:
-        for f in fig2:
-            prepend_path(f, path)
-    except TypeError:
-        prepend_path(fig2, path)
 
     plt.show()
