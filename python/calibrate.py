@@ -148,7 +148,7 @@ def calibrate_speed(path, config):
 
 if __name__ == '__main__':
     path = os.path.join(os.path.dirname(__file__),
-                        r'data/calibration')
+                        r'../data/etrike/calibration')
     cfg1 = get_calibration_config(path)
 
     import pickle
