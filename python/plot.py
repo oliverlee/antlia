@@ -24,35 +24,35 @@ def signal_unit(s):
     else:
         raise ValueError('unit for signal {} is not defined'.format(s))
 
-def check_valid_record(record):
-    # check that record dtype doesn't contain nested dtypes
-    assert all(np.issubdtype(record.dtype[i], np.number)
-               for i in range(len(record.dtype)))
+def check_valid_record(rec):
+    # check that rec dtype doesn't contain nested dtypes
+    assert all(np.issubdtype(rec.dtype[i], np.number)
+               for i in range(len(rec.dtype)))
 
     # time is the first field
-    assert record.dtype.names[0] == 'time'
+    assert rec.dtype.names[0] == 'time'
 
 
-def get_subplot_grid(record):
-    check_valid_record(record)
-    n = len(record.dtype.names) - 1
+def get_subplot_grid(rec):
+    check_valid_record(rec)
+    n = len(rec.dtype.names) - 1
     cols = 3 if (not n % 3) and (n > 6) else 2
     rows = int(np.ceil(n / cols))
     return rows, cols
 
 
-def plot_timeseries(record):
-    check_valid_record(record)
+def plot_timeseries(rec):
+    check_valid_record(rec)
 
-    names = record.dtype.names
-    t = record[names[0]]
+    names = rec.dtype.names
+    t = rec[names[0]]
     signals = names[1:]
     colors = sns.color_palette('husl', len(signals))
 
-    rows, cols = get_subplot_grid(record)
+    rows, cols = get_subplot_grid(rec)
     fig, axes = plt.subplots(rows, cols, sharex=True)
     for ax, signal, color in zip(axes.ravel(), signals, colors):
-        ax.plot(t, record[signal], label=signal, color=color)
+        ax.plot(t, rec[signal], label=signal, color=color)
         ax.set_xlabel('time [s]')
         ax.set_ylabel(signal_unit(signal))
         ax.legend()
@@ -82,13 +82,13 @@ def rolling_fft(x, sample_period,
     return freq, window_start_indices, X
 
 
-def plot_stft(record, window_time_duration=1, subplot_grid=True):
+def plot_stft(rec, window_time_duration=1, subplot_grid=True):
     # window time duration: in seconds, larger value gives higher frequency
     # resolution
-    check_valid_record(record)
+    check_valid_record(rec)
 
-    names = record.dtype.names
-    t = record.time
+    names = rec.dtype.names
+    t = rec.time
     signals = names[1:]
     colors = sns.color_palette('husl', len(signals))
 
@@ -104,7 +104,7 @@ def plot_stft(record, window_time_duration=1, subplot_grid=True):
             window_time_duration, window_start_string)
 
     if subplot_grid:
-        rows, cols = get_subplot_grid(record)
+        rows, cols = get_subplot_grid(rec)
         fig = plt.figure()
     else:
         fig = [plt.figure() for _ in signals]
@@ -118,7 +118,7 @@ def plot_stft(record, window_time_duration=1, subplot_grid=True):
             ax = fig[i].add_subplot(1, 1, 1, projection='3d')
             fig[i].suptitle(figure_title)
         start_times = t[window_start_indices]
-        frequencies, _, amplitudes = rolling_fft(r[signal], sample_period,
+        frequencies, _, amplitudes = rolling_fft(rec[signal], sample_period,
                                                  window_start_indices,
                                                  window_length)
         X, Y = np.meshgrid(frequencies, start_times)
@@ -168,11 +168,12 @@ if __name__ == '__main__':
 
     # get slice of data since it is HUGE
     t = r.time
-    i0 = np.argmax(t >= 500)
-    i1 = np.argmax(t >= 540)
-    fig, axes = plot_timeseries(r[i0:i1])
+    i0 = np.argmax(t >= 4700)
+    i1 = np.argmax(t >= 4800)
+    rr = r[i0:i1]
+    fig, axes = plot_timeseries(rr)
     fig.suptitle(path)
 
-    fig2, axes2 = plot_stft(r, subplot_grid=True)
+    fig2, axes2 = plot_stft(rr, subplot_grid=True)
 
     plt.show()
