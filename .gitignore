@@ -5,5 +5,8 @@
 # OSX files
 .DS_Store
 
-# data files
-python/data
+# etrike data files
+data/etrike
+
+# python cache files
+*/__pycache__
