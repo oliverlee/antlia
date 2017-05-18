@@ -10,7 +10,13 @@ def load_file(filename, calibration_dict=None):
         return convert_etrike(data, calibration_dict)
     elif filename.endswith('.h5'):
         data = load_imuwnet(filename)
-        return convert_imuwnet(data)
+        r = convert_imuwnet(data)
+        for d in data:
+            try:
+                d.close()
+            except AttributeError:
+                pass
+        return r
 
 
 def load_etrike(filename):
@@ -96,5 +102,5 @@ def convert_imuwnet(data):
                      for s in ['steer_angle', 'speed']]
         signals = signals[:1] + g_signals + signals[1:]
 
-    r = np.core.records.fromarrays(signals, names=names)
+    r = np.rec.fromarrays(signals, names=names)
     return r
