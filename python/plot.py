@@ -118,7 +118,7 @@ def plot_stft(rec, window_time_duration=1, subplot_grid=True):
             ax = fig[i].add_subplot(1, 1, 1, projection='3d')
             fig[i].suptitle(figure_title)
         start_times = t[window_start_indices]
-        frequencies, _, amplitudes = rolling_fft(r[signal], sample_period,
+        frequencies, _, amplitudes = rolling_fft(rec[signal], sample_period,
                                                  window_start_indices,
                                                  window_length)
         X, Y = np.meshgrid(frequencies, start_times)
