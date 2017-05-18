@@ -58,12 +58,21 @@ def load_imuwnet(filename):
     """ Data from Cain, 2016, Measurement of bicycle and rider kinematics during
     real-world cycling using a wireless array of inertial sensors.
     """
-    return h5py.File(filename, 'r')
+    # 'raw' imu data
+    f = h5py.File(filename, 'r')
+    try:
+        # mat file with calculated speed, steer angle, etc.
+        g = h5py.File(filename + '.mat', 'r')
+    except OSError:
+        g = None
+    return (f, g)
 
 
 def convert_imuwnet(data):
+    f, g = data
+
     # frame data corresponds to imu SI-002767
-    dataset = data['SI-002767']
+    dataset = f['SI-002767']
     acc = dataset['Calibrated/Accelerometers'].value
     gyro = dataset['Calibrated/Gyroscopes'].value
     t = dataset['Time'].value.flatten()
@@ -78,10 +87,14 @@ def convert_imuwnet(data):
              'gyroscope x',
              'gyroscope y',
              'gyroscope z']
-
     split = lambda x: [y.flatten() for y in np.split(x, 3, axis=1)]
-    r = np.core.records.fromarrays(
-            #[t] + np.split(acc, 3, axis=1) + np.split(gyro, 3, axis=1),
-            [t] + split(acc) + split(gyro),
-            names=names)
+    signals = [t] + split(acc) + split(gyro)
+
+    if g is not None:
+        names = names[:1] + ['steer angle', 'speed'] + names[1:]
+        g_signals = [g['data/{}'.format(s)].value.flatten()
+                     for s in ['steer_angle', 'speed']]
+        signals = signals[:1] + g_signals + signals[1:]
+
+    r = np.core.records.fromarrays(signals, names=names)
     return r
