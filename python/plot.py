@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import glob
 import os
 import sys
 import numpy as np
@@ -114,31 +115,61 @@ def plot_stft(rec, window_time_duration=1, subplot_grid=True):
     return fig, axes
 
 
+def plot_trial_velocities(trial_dir, calibration_dict):
+    pathname = os.path.join(trial_dir, '*.csv')
+    filenames = glob.glob(pathname)
+
+    fig, axes = plt.subplots(2, 2)
+    axes = axes.ravel()
+    colors = sns.color_palette('Paired', 8)
+    for i, (f, ax) in enumerate(zip(filenames, axes), 1):
+        try:
+            r = record.load_file(f, calibration_dict)
+        except IndexError as e:
+            print(e)
+            continue
+        t = r['time']
+        ws = 55 # samples -> 0.44 seconds @ 125 Hz
+        vf = ff.moving_average(r['speed'], ws)
+        af = ff.moving_average(r['accelerometer x'], ws)
+        vc = colors[1]
+        ac = colors[3]
+        ax.plot(t, vf, label='velocity, moving average', color=vc)
+        ax.plot(t, af, label='acceleration, moving average', color=ac)
+        ax.plot(t, ff.moving_average(r['speed'], ws, ws/2),
+                label='velocity, gaussian weighted moving average', color=vc,
+                linestyle='--')
+        ax.plot(t, ff.moving_average(r['accelerometer x'], ws, ws/2),
+                label='acceleration, gaussian weighted moving average',
+                color=ac, linestyle='--')
+        ax.legend()
+        ylim = ax.get_ylim()
+        ax.plot(t, r['speed'], color=vc, alpha=0.3)
+        ax.plot(t, r['accelerometer x'], color=ac, alpha=0.3)
+        ax.set_ylim(ylim)
+        ax.set_title('trial {}: {}'.format(i, os.path.basename(f)))
+        ax.set_ylabel('m/s, -m/s^2')
+        ax.set_xlabel('time [s]')
+        ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
+                   linewidth=1,zorder=1)
+    return fig, axes
+
+
 if __name__ == '__main__':
     import record
     import pickle
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-    else:
-        import glob
-        pathname = os.path.join(os.path.dirname(__file__),
-                r'../data/etrike/experiment/rider3/convbike/*.csv')
-        filenames = glob.glob(pathname)
-        path = filenames[3]
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
-    r = record.load_file(path, cd['convbike'])
-    fig, axes = plot_timeseries(r)
-    fig.suptitle(path)
 
-    prepend_path = lambda f, p: f.suptitle(
-            '{}\n{}'.format(path, f._suptitle.get_text()))
-    fig2, axes2 = plot_stft(r, subplot_grid=True)
-    try:
-        for f in fig2:
-            prepend_path(f, path)
-    except TypeError:
-        prepend_path(fig2, path)
+
+    rider_id = [1]
+    if len(sys.argv) > 1:
+        rider_id = sys.argv[1:]
+    for rid in rider_id:
+        path = os.path.join(os.path.dirname(__file__),
+                r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
+        fig, axes = plot_trial_velocities(path, cd['convbike'])
+        fig.suptitle('rider {}'.format(rid))
 
     #path = os.path.join(os.path.dirname(__file__),
     #                    '../data/20160107-113037_sensor_data.h5')
