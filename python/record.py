@@ -22,7 +22,8 @@ def load_file(filename, calibration_dict=None):
 def load_etrike(filename):
     # steer angle and speed are sampled as integer types but we later convert
     # them to floats for plotting
-    return np.recfromcsv(filename, delimiter=',', dtype=np.float64)
+    return np.recfromcsv(filename, delimiter=',', dtype=np.float64,
+                         invalid_raise=False)
 
 
 def convert_etrike(record, calibration_dict):
