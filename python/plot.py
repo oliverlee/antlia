@@ -115,33 +115,72 @@ def plot_stft(rec, window_time_duration=1, subplot_grid=True):
     return fig, axes
 
 
+def trial_braking_indices(accel, threshold=0.3, min_size=15):
+    def get_contiguous_numbers(x):
+        from operator import itemgetter
+        from itertools import groupby
+        ranges = []
+        for k, g in groupby(enumerate(x), lambda y: y[0] - y[1]):
+            group = list(map(itemgetter(1), g))
+            ranges.append((group[0], group[-1]))
+        return ranges
+
+    indices = np.where(accel > threshold)[0]
+    ranges = get_contiguous_numbers(indices)
+
+    # exclude ranges smaller than min_size
+    ranges = [(r0, r1) for (r0, r1) in ranges if (r1 - r0) > min_size]
+
+    # merge ranges that are separated by min_size if acceleration sign does not
+    # change
+    merged = []
+    while ranges:
+        if len(ranges) == 1:
+            merged.append(ranges.pop(0))
+        else:
+            ra = ranges.pop(0)
+            rb = ranges[0]
+            if (((rb[0] - ra[1]) < min_size) and
+                np.all(np.sign(accel[ra[1]:rb[0]]) == 1)):
+                ranges[0] = (ra[0], rb[1])
+            else:
+                merged.append(ra)
+
+    # find the 'largest' range by simplified integration
+    largest = None
+    for r0, r1 in merged:
+        if largest is None:
+            largest = (r0, r1)
+        elif sum(accel[r0:r1]) > sum(accel[largest[0]:largest[1]]):
+            largest = (r0, r1)
+    return largest, merged
+
+
 def plot_trial_velocities(trial_dir, calibration_dict):
     pathname = os.path.join(trial_dir, '*.csv')
     filenames = glob.glob(pathname)
 
     fig, axes = plt.subplots(2, 2)
     axes = axes.ravel()
+    recs = []
     colors = sns.color_palette('Paired', 8)
     for i, (f, ax) in enumerate(zip(filenames, axes), 1):
         try:
             r = record.load_file(f, calibration_dict)
+            recs.append(r)
         except IndexError as e:
             print(e)
             continue
         t = r['time']
-        ws = 55 # samples -> 0.44 seconds @ 125 Hz
-        vf = ff.moving_average(r['speed'], ws)
-        af = ff.moving_average(r['accelerometer x'], ws)
+        ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
+        vf = ff.moving_average(r['speed'], ws, ws/2)
+        af = ff.moving_average(r['accelerometer x'], ws, ws/2)
         vc = colors[1]
         ac = colors[3]
-        ax.plot(t, vf, label='velocity, moving average', color=vc)
-        ax.plot(t, af, label='acceleration, moving average', color=ac)
-        ax.plot(t, ff.moving_average(r['speed'], ws, ws/2),
-                label='velocity, gaussian weighted moving average', color=vc,
-                linestyle='--')
-        ax.plot(t, ff.moving_average(r['accelerometer x'], ws, ws/2),
-                label='acceleration, gaussian weighted moving average',
-                color=ac, linestyle='--')
+        ax.plot(t, vf, label='velocity, gaussian weighted moving average',
+                color=vc)
+        ax.plot(t, af, label='acceleration, gaussian weighted moving average',
+                color=ac)
         ax.legend()
         ylim = ax.get_ylim()
         ax.plot(t, r['speed'], color=vc, alpha=0.3)
@@ -152,7 +191,14 @@ def plot_trial_velocities(trial_dir, calibration_dict):
         ax.set_xlabel('time [s]')
         ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
                    linewidth=1,zorder=1)
-    return fig, axes
+
+        largest_range, all_ranges = trial_braking_indices(af)
+        for r0, r1 in all_ranges:
+            ax.axvspan(t[r0], t[r1], color=colors[5], alpha=0.2)
+        if largest_range is not None:
+            ax.axvspan(t[largest_range[0]], t[largest_range[1]],
+                       color=colors[5], alpha=0.4)
+    return fig, axes, recs
 
 
 if __name__ == '__main__':
@@ -162,13 +208,13 @@ if __name__ == '__main__':
         cd = pickle.load(f)
 
 
-    rider_id = [1]
+    rider_id = range(1, 17)
     if len(sys.argv) > 1:
         rider_id = sys.argv[1:]
     for rid in rider_id:
         path = os.path.join(os.path.dirname(__file__),
                 r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
-        fig, axes = plot_trial_velocities(path, cd['convbike'])
+        fig, axes, recs = plot_trial_velocities(path, cd['convbike'])
         fig.suptitle('rider {}'.format(rid))
 
     #path = os.path.join(os.path.dirname(__file__),
