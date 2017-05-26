@@ -115,16 +115,17 @@ def plot_stft(rec, window_time_duration=1, subplot_grid=True):
     return fig, axes
 
 
-def trial_braking_indices(accel, threshold=0.3, min_size=15):
-    def get_contiguous_numbers(x):
-        from operator import itemgetter
-        from itertools import groupby
-        ranges = []
-        for k, g in groupby(enumerate(x), lambda y: y[0] - y[1]):
-            group = list(map(itemgetter(1), g))
-            ranges.append((group[0], group[-1]))
-        return ranges
+def get_contiguous_numbers(x):
+    from operator import itemgetter
+    from itertools import groupby
+    ranges = []
+    for k, g in groupby(enumerate(x), lambda y: y[0] - y[1]):
+        group = list(map(itemgetter(1), g))
+        ranges.append((group[0], group[-1]))
+    return ranges
 
+
+def trial_braking_indices(accel, threshold=0.3, min_size=15):
     indices = np.where(accel > threshold)[0]
     ranges = get_contiguous_numbers(indices)
 
@@ -208,7 +209,7 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
     fig, axes = plt.subplots(2, 2)
     axes = axes.ravel()
     recs = []
-    colors = sns.color_palette('Paired', 8)
+    colors = sns.color_palette('Paired', 10)
     for i, (f, ax) in enumerate(zip(filenames, axes), 1):
         try:
             r = record.load_file(f, calibration_dict)
@@ -226,15 +227,14 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
         if largest_range is None:
             continue
         else:
-            i0, i1 = largest_range
+            l0, l1 = largest_range
             # fit to 10 second window
             tw = 10
-            tb = t[i1] - t[i0]
+            tb = t[l1] - t[l0]
             assert tb < tw
             # try to center
-            i0w = int((i1 + i0)/2 - (i1 - i0)/2 * tw/tb)
-            i1w = int((i1 + i0)/2 + (i1 - i0)/2 * tw/tb)
-            i0, i1 = i0w, i1w
+            i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
+            i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
             # shift to left if the braking event can't be centered
             if i1 > len(r):
                 n = i1 - len(r) + 1
@@ -255,8 +255,21 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
         ax.set_xlabel('time [s]')
         ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
                    linewidth=1,zorder=1)
-        ax.axvspan(t[largest_range[0]], t[largest_range[1]],
-                   color=colors[5], alpha=0.3)
+        ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
+
+        # calculate and plot velocity fit
+        # determine if rear wheel is locking up, in this case, measurement is
+        # only of the rear wheel and not the bicycle and rider
+        lockup_indices = np.where((r['speed'] < 0.2) & (af > 3))[0]
+        lockup_ranges = get_contiguous_numbers(lockup_indices)
+        poly_range = set(range(l0, l1))
+        for lr0, lr1 in lockup_ranges:
+            ax.axvspan(t[lr0], t[lr1], color=colors[7], alpha=0.5)
+            poly_range -= set(range(lr0, lr1))
+
+        poly_indices = list(poly_range)
+        p = np.polyfit(t[poly_indices], r['speed'][poly_indices], 1)
+        ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
     return fig, axes, recs
 
 
