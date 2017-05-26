@@ -201,12 +201,70 @@ def plot_trial_velocities(trial_dir, calibration_dict):
     return fig, axes, recs
 
 
+def plot_trial_braking_events(trial_dir, calibration_dict):
+    pathname = os.path.join(trial_dir, '*.csv')
+    filenames = glob.glob(pathname)
+
+    fig, axes = plt.subplots(2, 2)
+    axes = axes.ravel()
+    recs = []
+    colors = sns.color_palette('Paired', 8)
+    for i, (f, ax) in enumerate(zip(filenames, axes), 1):
+        try:
+            r = record.load_file(f, calibration_dict)
+            recs.append(r)
+        except IndexError as e:
+            print(e)
+            continue
+        t = r['time']
+        ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
+        vf = ff.moving_average(r['speed'], ws, ws/2)
+        af = ff.moving_average(r['accelerometer x'], ws, ws/2)
+        vc = colors[1]
+        ac = colors[3]
+        largest_range, all_ranges = trial_braking_indices(af)
+        if largest_range is None:
+            continue
+        else:
+            i0, i1 = largest_range
+            # fit to 10 second window
+            tw = 10
+            tb = t[i1] - t[i0]
+            assert tb < tw
+            # try to center
+            i0w = int((i1 + i0)/2 - (i1 - i0)/2 * tw/tb)
+            i1w = int((i1 + i0)/2 + (i1 - i0)/2 * tw/tb)
+            i0, i1 = i0w, i1w
+            # shift to left if the braking event can't be centered
+            if i1 > len(r):
+                n = i1 - len(r) + 1
+                i0 -= n
+                i1 -= n
+
+        ax.plot(t[i0:i1], vf[i0:i1], color=vc,
+                label='velocity, gaussian weighted moving average')
+        ax.plot(t[i0:i1], af[i0:i1], color=ac,
+                label='acceleration, gaussian weighted moving average')
+        ax.legend()
+        ylim = ax.get_ylim()
+        ax.plot(t[i0:i1], r['speed'][i0:i1], color=vc, alpha=0.3)
+        ax.plot(t[i0:i1], r['accelerometer x'][i0:i1], color=ac, alpha=0.3)
+        ax.set_ylim(ylim)
+        ax.set_title('trial {}: {}'.format(i, os.path.basename(f)))
+        ax.set_ylabel('m/s, -m/s^2')
+        ax.set_xlabel('time [s]')
+        ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
+                   linewidth=1,zorder=1)
+        ax.axvspan(t[largest_range[0]], t[largest_range[1]],
+                   color=colors[5], alpha=0.3)
+    return fig, axes, recs
+
+
 if __name__ == '__main__':
     import record
     import pickle
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
-
 
     rider_id = range(1, 17)
     if len(sys.argv) > 1:
@@ -214,7 +272,7 @@ if __name__ == '__main__':
     for rid in rider_id:
         path = os.path.join(os.path.dirname(__file__),
                 r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
-        fig, axes, recs = plot_trial_velocities(path, cd['convbike'])
+        fig, axes, recs = plot_trial_braking_events(path, cd['convbike'])
         fig.suptitle('rider {}'.format(rid))
 
     #path = os.path.join(os.path.dirname(__file__),
