@@ -4,6 +4,7 @@ import glob
 import os
 import sys
 import numpy as np
+import scipy.stats
 import matplotlib.lines
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -209,6 +210,7 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
     fig, axes = plt.subplots(2, 2)
     axes = axes.ravel()
     recs = []
+    stats = []
     colors = sns.color_palette('Paired', 10)
     for i, (f, ax) in enumerate(zip(filenames, axes), 1):
         try:
@@ -270,7 +272,13 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
         poly_indices = list(poly_range)
         p = np.polyfit(t[poly_indices], r['speed'][poly_indices], 1)
         ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
-    return fig, axes, recs
+        st = list(scipy.stats.linregress(t[poly_indices],
+                                         r['speed'][poly_indices]))
+        st.append(t[l1] - t[l0])
+        st.append(vf[l0])
+        # slope, intercept, r-value, p-value, stderr, time, start vel
+        stats.extend(st)
+    return fig, axes, recs, stats
 
 
 if __name__ == '__main__':
@@ -279,14 +287,35 @@ if __name__ == '__main__':
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
 
+    stats = []
     rider_id = range(1, 17)
     if len(sys.argv) > 1:
         rider_id = sys.argv[1:]
     for rid in rider_id:
         path = os.path.join(os.path.dirname(__file__),
                 r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
-        fig, axes, recs = plot_trial_braking_events(path, cd['convbike'])
+        fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
         fig.suptitle('rider {}'.format(rid))
+        stats.extend(st)
+    stats = np.array(stats)
+    stats = stats.reshape((-1, 7))
+
+    colors = sns.color_palette('Paired', 10)
+    fig, axes = plt.subplots(2, 2)
+    sns.distplot(stats[:, 0], ax=axes[0][0], color=colors[1], kde=False) # slope
+    axes[0][0].set_title('slope of velocity line fit [m/s^2]')
+    sns.distplot(stats[:, 2]**2, ax=axes[0][1], color=colors[3], kde=False) # r squared
+    axes[0][1].set_title('r-value squared')
+    sns.distplot(stats[:, 5], ax=axes[1][0], color=colors[5], kde=False) # time
+    axes[1][0].set_title('braking event duration [s]')
+    sns.distplot(stats[:, 6], ax=axes[1][1], color=colors[7], kde=False) # velocity
+    axes[1][1].set_title('starting velocity [m/s]')
+    fig.suptitle('histograms of trial braking events')
+
+    g = sns.jointplot(x=stats[:, 0], y=stats[:, 6], color=colors[9])
+    g.set_axis_labels('slope [m/s^2]', 'velocity [m/s]')
+    g.fig.suptitle(
+        'scatterplot of starting velocity and best fit line for braking events')
 
     #path = os.path.join(os.path.dirname(__file__),
     #                    '../data/20160107-113037_sensor_data.h5')
