@@ -123,13 +123,13 @@ def make_stats(recs, dtype):
 
 
 if __name__ == '__main__':
-    from matplotlib.backends.backend_pdf import PdfPages
-    pp = PdfPages('braking_plots.pdf')
+    #from matplotlib.backends.backend_pdf import PdfPages
+    #pp = PdfPages('braking_plots.pdf')
 
-    def save_fig(fig):
-        fig.set_size_inches(12.76, 7.19)
-        fig.tight_layout()
-        pp.savefig()
+    #def save_fig(fig):
+    #    fig.set_size_inches(12.76, 7.19)
+    #    fig.tight_layout()
+    #    pp.savefig()
 
     import record
     import pickle
@@ -137,23 +137,24 @@ if __name__ == '__main__':
         cd = pickle.load(f)
 
     recs = load_records()
-    stats = make_stats(recs, braking.braking_metrics_dtype)
 
-    for rid in range(1, 17):
-        fig, axes = braking.plot_rider_braking_events(recs, rid)
-        save_fig(fig)
-        fig, axes = braking.plot_rider_velocities(recs, rid)
-        save_fig(fig)
+    ## braking plots
+    #stats = make_stats(recs, braking.braking_metrics_dtype)
 
-    fig, axes = braking.plot_histograms(stats)
-    save_fig(fig)
+    #for rid in range(1, 17):
+    #    fig, axes = braking.plot_rider_braking_events(recs, rid)
+    #    save_fig(fig)
+    #    fig, axes = braking.plot_rider_velocities(recs, rid)
+    #    save_fig(fig)
 
-    grids = braking.plot_bivariates(stats)
-    for g in grids:
-        save_fig(g.fig)
+    #fig, axes = braking.plot_histograms(stats)
+    #save_fig(fig)
 
-    fig, axes = braking.plot_swarms(stats)
-    save_fig(fig)
+    ## steering plots
+    for rid, tid, r in recs:
+        if tid == 4:
+            fig, axes = plot_timeseries(r)
+            fig.suptitle('rider {} trial {}'.format(rid, tid))
 
-    #plt.show()
-    pp.close()
+    plt.show()
+    #pp.close()
