@@ -1,14 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import glob
 import os
 import sys
 import numpy as np
-import scipy.signal
-import scipy.fftpack
+import scipy.stats
 import matplotlib.lines
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
+
+import filter as ff
 
 
 def signal_unit(s):
@@ -23,6 +25,7 @@ def signal_unit(s):
         return 'm/s'
     else:
         raise ValueError('unit for signal {} is not defined'.format(s))
+
 
 def check_valid_record(rec):
     # check that rec dtype doesn't contain nested dtypes
@@ -58,28 +61,6 @@ def plot_timeseries(rec):
         ax.legend()
 
     return fig, axes
-
-
-def fft(x, sample_period, window_type=None):
-    if window_type is None:
-        window_type = scipy.signal.hamming
-    n = len(x)
-    windowed_x = np.multiply(x, window_type(n))
-
-    # only use first half of fft since real signals are mirrored about nyquist
-    # frequency
-    xf = 2/n * np.abs(scipy.fftpack.fft(windowed_x)[:n//2])
-    freq = np.linspace(0, 1/(2*sample_period), n/2)
-    return freq, xf
-
-
-def rolling_fft(x, sample_period,
-                window_start_indices, window_length, window_type=None):
-    X = []
-    for i in window_start_indices:
-        freq, xf = fft(x[i:i + window_length], sample_period, window_type)
-        X.append(xf)
-    return freq, window_start_indices, X
 
 
 def plot_stft(rec, window_time_duration=1, subplot_grid=True):
@@ -118,9 +99,10 @@ def plot_stft(rec, window_time_duration=1, subplot_grid=True):
             ax = fig[i].add_subplot(1, 1, 1, projection='3d')
             fig[i].suptitle(figure_title)
         start_times = t[window_start_indices]
-        frequencies, _, amplitudes = rolling_fft(rec[signal], sample_period,
-                                                 window_start_indices,
-                                                 window_length)
+        frequencies, _, amplitudes = ff.rolling_fft(rec[signal],
+                                                    sample_period,
+                                                    window_start_indices,
+                                                    window_length)
         X, Y = np.meshgrid(frequencies, start_times)
         Z = np.reshape(amplitudes, X.shape)
         ax.plot_surface(X, Y, Z,
@@ -134,46 +116,217 @@ def plot_stft(rec, window_time_duration=1, subplot_grid=True):
     return fig, axes
 
 
+def get_contiguous_numbers(x):
+    from operator import itemgetter
+    from itertools import groupby
+    ranges = []
+    for k, g in groupby(enumerate(x), lambda y: y[0] - y[1]):
+        group = list(map(itemgetter(1), g))
+        ranges.append((group[0], group[-1]))
+    return ranges
+
+
+def trial_braking_indices(accel, threshold=0.3, min_size=15):
+    indices = np.where(accel > threshold)[0]
+    ranges = get_contiguous_numbers(indices)
+
+    # exclude ranges smaller than min_size
+    ranges = [(r0, r1) for (r0, r1) in ranges if (r1 - r0) > min_size]
+
+    # merge ranges that are separated by min_size if acceleration sign does not
+    # change
+    merged = []
+    while ranges:
+        if len(ranges) == 1:
+            merged.append(ranges.pop(0))
+        else:
+            ra = ranges.pop(0)
+            rb = ranges[0]
+            if (((rb[0] - ra[1]) < min_size) and
+                np.all(np.sign(accel[ra[1]:rb[0]]) == 1)):
+                ranges[0] = (ra[0], rb[1])
+            else:
+                merged.append(ra)
+
+    # find the 'largest' range by simplified integration
+    largest = None
+    for r0, r1 in merged:
+        if largest is None:
+            largest = (r0, r1)
+        elif sum(accel[r0:r1]) > sum(accel[largest[0]:largest[1]]):
+            largest = (r0, r1)
+    return largest, merged
+
+
+def plot_trial_velocities(trial_dir, calibration_dict):
+    pathname = os.path.join(trial_dir, '*.csv')
+    filenames = glob.glob(pathname)
+
+    fig, axes = plt.subplots(2, 2)
+    axes = axes.ravel()
+    recs = []
+    colors = sns.color_palette('Paired', 8)
+    for i, (f, ax) in enumerate(zip(filenames, axes), 1):
+        try:
+            r = record.load_file(f, calibration_dict)
+            recs.append(r)
+        except IndexError as e:
+            print(e)
+            continue
+        t = r['time']
+        ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
+        vf = ff.moving_average(r['speed'], ws, ws/2)
+        af = ff.moving_average(r['accelerometer x'], ws, ws/2)
+        vc = colors[1]
+        ac = colors[3]
+        ax.plot(t, vf, label='velocity, gaussian weighted moving average',
+                color=vc)
+        ax.plot(t, af, label='acceleration, gaussian weighted moving average',
+                color=ac)
+        ax.legend()
+        ylim = ax.get_ylim()
+        ax.plot(t, r['speed'], color=vc, alpha=0.3)
+        ax.plot(t, r['accelerometer x'], color=ac, alpha=0.3)
+        ax.set_ylim(ylim)
+        ax.set_title('trial {}: {}'.format(i, os.path.basename(f)))
+        ax.set_ylabel('m/s, -m/s^2')
+        ax.set_xlabel('time [s]')
+        ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
+                   linewidth=1,zorder=1)
+
+        largest_range, all_ranges = trial_braking_indices(af)
+        for r0, r1 in all_ranges:
+            ax.axvspan(t[r0], t[r1], color=colors[5], alpha=0.2)
+        if largest_range is not None:
+            ax.axvspan(t[largest_range[0]], t[largest_range[1]],
+                       color=colors[5], alpha=0.4)
+    return fig, axes, recs
+
+
+def plot_trial_braking_events(trial_dir, calibration_dict):
+    pathname = os.path.join(trial_dir, '*.csv')
+    filenames = glob.glob(pathname)
+
+    fig, axes = plt.subplots(2, 2)
+    axes = axes.ravel()
+    recs = []
+    stats = []
+    colors = sns.color_palette('Paired', 10)
+    for i, (f, ax) in enumerate(zip(filenames, axes), 1):
+        try:
+            r = record.load_file(f, calibration_dict)
+            recs.append(r)
+        except IndexError as e:
+            print(e)
+            continue
+        t = r['time']
+        ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
+        vf = ff.moving_average(r['speed'], ws, ws/2)
+        af = ff.moving_average(r['accelerometer x'], ws, ws/2)
+        vc = colors[1]
+        ac = colors[3]
+        largest_range, all_ranges = trial_braking_indices(af)
+        if largest_range is None:
+            continue
+        else:
+            l0, l1 = largest_range
+            # fit to 10 second window
+            tw = 10
+            tb = t[l1] - t[l0]
+            assert tb < tw
+            # try to center
+            i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
+            i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
+            # shift to left if the braking event can't be centered
+            if i1 > len(r):
+                n = i1 - len(r) + 1
+                i0 -= n
+                i1 -= n
+
+        ax.plot(t[i0:i1], vf[i0:i1], color=vc,
+                label='velocity, gaussian weighted moving average')
+        ax.plot(t[i0:i1], af[i0:i1], color=ac,
+                label='acceleration, gaussian weighted moving average')
+        ax.legend()
+        ylim = ax.get_ylim()
+        ax.plot(t[i0:i1], r['speed'][i0:i1], color=vc, alpha=0.3)
+        ax.plot(t[i0:i1], r['accelerometer x'][i0:i1], color=ac, alpha=0.3)
+        ax.set_ylim(ylim)
+        ax.set_title('trial {}: {}'.format(i, os.path.basename(f)))
+        ax.set_ylabel('m/s, -m/s^2')
+        ax.set_xlabel('time [s]')
+        ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
+                   linewidth=1,zorder=1)
+        ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
+
+        # calculate and plot velocity fit
+        # determine if rear wheel is locking up, in this case, measurement is
+        # only of the rear wheel and not the bicycle and rider
+        lockup_indices = np.where((r['speed'] < 0.2) & (af > 3))[0]
+        lockup_ranges = get_contiguous_numbers(lockup_indices)
+        poly_range = set(range(l0, l1))
+        for lr0, lr1 in lockup_ranges:
+            ax.axvspan(t[lr0], t[lr1], color=colors[7], alpha=0.5)
+            poly_range -= set(range(lr0, lr1))
+
+        poly_indices = list(poly_range)
+        p = np.polyfit(t[poly_indices], r['speed'][poly_indices], 1)
+        ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
+        st = list(scipy.stats.linregress(t[poly_indices],
+                                         r['speed'][poly_indices]))
+        st.append(t[l1] - t[l0])
+        st.append(vf[l0])
+        # slope, intercept, r-value, p-value, stderr, time, start vel
+        stats.extend(st)
+    return fig, axes, recs, stats
+
 
 if __name__ == '__main__':
     import record
     import pickle
-    if len(sys.argv) > 1:
-        path = sys.argv[1]
-    else:
-        import glob
-        pathname = os.path.join(os.path.dirname(__file__),
-                r'../data/etrike/experiment/rider3/convbike/*.csv')
-        filenames = glob.glob(pathname)
-        path = filenames[3]
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
-    r2 = record.load_file(path, cd['convbike'])
 
-    # fig, axes = plot_timeseries(r)
-    # fig.suptitle(path)
+    stats = []
+    rider_id = range(1, 17)
+    if len(sys.argv) > 1:
+        rider_id = sys.argv[1:]
+    for rid in rider_id:
+        path = os.path.join(os.path.dirname(__file__),
+                r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
+        fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
+        fig.suptitle('rider {}'.format(rid))
+        stats.extend(st)
+    stats = np.array(stats)
+    stats = stats.reshape((-1, 7))
 
-    # prepend_path = lambda f, p: f.suptitle(
-    #         '{}\n{}'.format(path, f._suptitle.get_text()))
-    # fig2, axes2 = plot_stft(r, subplot_grid=True)
-    # try:
-    #     for f in fig2:
-    #         prepend_path(f, path)
-    # except TypeError:
-    #     prepend_path(fig2, path)
+    colors = sns.color_palette('Paired', 10)
+    fig, axes = plt.subplots(2, 2)
+    sns.distplot(stats[:, 0], ax=axes[0][0], color=colors[1], kde=False) # slope
+    axes[0][0].set_title('slope of velocity line fit [m/s^2]')
+    sns.distplot(stats[:, 2]**2, ax=axes[0][1], color=colors[3], kde=False) # r squared
+    axes[0][1].set_title('r-value squared')
+    sns.distplot(stats[:, 5], ax=axes[1][0], color=colors[5], kde=False) # time
+    axes[1][0].set_title('braking event duration [s]')
+    sns.distplot(stats[:, 6], ax=axes[1][1], color=colors[7], kde=False) # velocity
+    axes[1][1].set_title('starting velocity [m/s]')
+    fig.suptitle('histograms of trial braking events')
 
-    path = os.path.join(os.path.dirname(__file__),
-                        '../data/20160107-113037_sensor_data.h5')
-    r = record.load_file(path)
+    g = sns.jointplot(x=stats[:, 0], y=stats[:, 6], color=colors[9])
+    g.set_axis_labels('slope [m/s^2]', 'velocity [m/s]')
+    g.fig.suptitle(
+        'scatterplot of starting velocity and best fit line for braking events')
 
-    # get slice of data since it is HUGE
-    t = r.time
-    i0 = np.argmax(t >= 4700)
-    i1 = np.argmax(t >= 4800)
-    rr = r[i0:i1]
-    fig, axes = plot_timeseries(rr)
-    fig.suptitle(path)
+    #path = os.path.join(os.path.dirname(__file__),
+    #                    '../data/20160107-113037_sensor_data.h5')
+    #r = record.load_file(path)
 
-    fig2, axes2 = plot_stft(rr, subplot_grid=True)
+    ## get slice of data since it is HUGE
+    #t = r.time
+    #i0 = np.argmax(t >= 4700)
+    #i1 = np.argmax(t >= 4800)
+    #rr = r[i0:i1]
+    #fig, axes = plot_timeseries(rr)
+    #fig.suptitle(path)
 
     plt.show()
