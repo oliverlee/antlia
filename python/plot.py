@@ -351,28 +351,82 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         rider_id = sys.argv[1:]
     for rid in rider_id:
+        #path = os.path.join(os.path.dirname(__file__),
+        #        r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
+        #fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
+        #fig.suptitle('rider {}'.format(rid))
+        #stats = np.hstack((stats, st))
         path = os.path.join(os.path.dirname(__file__),
-                r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
-        fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
-        fig.suptitle('rider {}'.format(rid))
-        stats = np.hstack((stats, st))
+                r'../data/etrike/experiment/rider{}/convbike/*.csv'.format(rid))
+        filenames = glob.glob(path)
+        for f in filenames:
+            try:
+                r = record.load_file(f, cd['convbike'])
+            except IndexError:
+                continue
+            try:
+                metrics, _, _, _ = get_braking_metrics(r)
+                metrics['rider id'] = rid # FIXME allow rider id to be passed as function input
+            except TypeError:
+                continue
+            stats = np.hstack((stats, metrics))
 
-    ##colors = sns.color_palette('Paired', 10)
-    ##fig, axes = plt.subplots(2, 2)
-    ##sns.distplot(stats[:, 0], ax=axes[0][0], color=colors[1], kde=False) # slope
-    ##axes[0][0].set_title('slope of velocity line fit [m/s^2]')
-    ##sns.distplot(stats[:, 2]**2, ax=axes[0][1], color=colors[3], kde=False) # r squared
-    ##axes[0][1].set_title('r-value squared')
-    ##sns.distplot(stats[:, 5], ax=axes[1][0], color=colors[5], kde=False) # time
-    ##axes[1][0].set_title('braking event duration [s]')
-    ##sns.distplot(stats[:, 6], ax=axes[1][1], color=colors[7], kde=False) # velocity
-    ##axes[1][1].set_title('starting velocity [m/s]')
-    ##fig.suptitle('histograms of trial braking events')
+    colors = sns.husl_palette(6, s=.8, l=.5)
+    fig, axes = plt.subplots(2, 3)
+    fig.suptitle('histograms of braking events')
+    axes = axes.ravel()
+    field = [('slope of regression line [m/s^2]', 'linregress slope', None),
+             ('square of correlation coefficient', 'linregress r-value', lambda x: x**2),
+             ('standard error of estimated gradient', 'linregress stderr', None),
+             ('starting velocity [m/s]', 'starting velocity', None),
+             ('braking duration [s]', 'braking duration', None),
+             ('braking distance [m]', 'braking distance', None),]
+    for ax, f, c in zip(axes, field, colors):
+        label, fieldname, func = f
+        x = stats[fieldname]
+        if func is not None:
+            x = func(x)
+        sns.distplot(x, ax=ax, color=c, label=label, kde=False)
+        ax.legend()
 
-    ##g = sns.jointplot(x=stats[:, 0], y=stats[:, 6], color=colors[9])
-    ##g.set_axis_labels('slope [m/s^2]', 'velocity [m/s]')
-    ##g.fig.suptitle(
-    ##    'scatterplot of starting velocity and best fit line for braking events')
+    yfields = [('starting velocity', 'm/s'),
+               ('braking duration', 'm'),
+               ('braking distance', 's')]
+    colors = sns.husl_palette(stats['rider id'].max() + 1, l=.7)
+    riders = np.unique(stats['rider id'])
+    proxy_lines = []
+    for rid in riders:
+        c = colors[rid]
+        l = matplotlib.lines.Line2D([], [],
+                linestyle='', marker='o', markerfacecolor=c,
+                label='rider {}'.format(rid))
+        proxy_lines.append(l)
+
+    for yf in yfields:
+        name, unit = yf
+        x = stats['linregress slope']
+        y = stats[name]
+        g = sns.JointGrid(x=x, y=y)
+        g.plot_marginals(sns.distplot, kde=False,
+                         color=sns.xkcd_palette(['charcoal'])[0])
+        g.plot_joint(plt.scatter,
+                     color=list(map(lambda x: colors[x], stats['rider id'])))
+        g.ax_joint.legend(handles=proxy_lines, ncol=2, title=
+                'pearson r = {:.2g}, p = {:.2g}'.format(
+                    *scipy.stats.pearsonr(x, y)))
+        g.set_axis_labels('slope [m/s^2]', '{} [{}]'.format(yf, unit))
+        g.fig.suptitle('scatterplots of braking events')
+
+    fig, axes = plt.subplots(4, 1, sharex=True)
+    fig.suptitle('swarm plot of braking metrics per rider')
+    axes = axes.ravel()
+    yfields.append(('linregress slope', 'm/s^2'))
+    for yf, ax in zip(yfields, axes):
+        y = stats[yf[0]]
+        x = stats['rider id']
+        sns.swarmplot(x=x, y=y, ax=ax);
+        ax.set_ylabel('{} [{}]'.format(yf[0], yf[1]))
+    ax.set_xlabel('rider id')
 
     #path = os.path.join(os.path.dirname(__file__),
     #                    '../data/20160107-113037_sensor_data.h5')
