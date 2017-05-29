@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import glob
 import os
+import re
 import sys
 import numpy as np
 import scipy.stats
@@ -202,6 +203,73 @@ def plot_trial_velocities(trial_dir, calibration_dict):
                        color=colors[5], alpha=0.4)
     return fig, axes, recs
 
+braking_metrics_dtype = np.dtype([
+    ('linregress slope', '<f8'),
+    ('linregress intercept', '<f8'),
+    ('linregress r-value', '<f8'),
+    ('linregress p-value', '<f8'),
+    ('linregress stderr', '<f8'),
+    ('starting velocity', '<f8'),
+    ('braking duration', '<f8'),
+    ('braking distance', '<f8'),
+    ('window size', '<i8'),
+    ('braking range', '<i8', 2),
+    ('lockup ranges', '<i8'),
+    ('rider id', '<i8')
+])
+
+def get_braking_metrics(rec, window_size=55):
+    """ window size in samples
+        ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
+    """
+    t = rec['time']
+    v = rec['speed']
+    filtered_velocity = ff.moving_average(v,
+                                          window_size, window_size/2)
+    filtered_acceleration = ff.moving_average(rec['accelerometer x'],
+                                              window_size, window_size/2)
+    braking_range, _ = trial_braking_indices(filtered_acceleration)
+    b0, b1 = braking_range
+
+    # determine if wheel lockup occurs
+    # look at raw speed and filtered acceleration
+    lockup_indices = np.where((v < 0.2) &
+                              (filtered_acceleration > 3))[0]
+    lockup_ranges = get_contiguous_numbers(lockup_indices)
+
+    # calculate braking indices by removing lockup ranges
+    br = set(range(b0, b1))
+    for l0, l1 in lockup_ranges:
+        br -= set(range(l0, l1))
+    braking_indices = list(br)
+
+    # best-fit line metrics
+    slope, intercept, r_value, p_value, stderr = scipy.stats.linregress(
+            t[braking_indices], v[braking_indices])
+    # braking metrics
+    start_velocity = filtered_velocity[b0]
+    braking_duration = t[b1] - t[b0]
+    # TODO what if best-fit line crosses zero?
+    braking_distance = (np.polyval([slope, intercept], [t[b0], t[b1]]).mean() *
+                        braking_duration)
+    # TODO do filtering in another function and pass filtered signals to this
+    # function to calculate metrics
+    return (np.array([(slope,
+                     intercept,
+                     r_value,
+                     p_value,
+                     stderr,
+                     start_velocity,
+                     braking_duration,
+                     braking_distance,
+                     window_size,
+                     braking_range,
+                     len(lockup_ranges),
+                     0)], dtype=braking_metrics_dtype),
+            filtered_velocity,
+            filtered_acceleration,
+            lockup_ranges)
+
 
 def plot_trial_braking_events(trial_dir, calibration_dict):
     pathname = os.path.join(trial_dir, '*.csv')
@@ -210,9 +278,10 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
     fig, axes = plt.subplots(2, 2)
     axes = axes.ravel()
     recs = []
-    stats = []
+    stats = np.array([], dtype=braking_metrics_dtype)
     colors = sns.color_palette('Paired', 10)
     for i, (f, ax) in enumerate(zip(filenames, axes), 1):
+        rider_id = re.search(r'rider([\d]+)/', f).group(1)
         try:
             r = record.load_file(f, calibration_dict)
             recs.append(r)
@@ -220,28 +289,26 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
             print(e)
             continue
         t = r['time']
-        ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
-        vf = ff.moving_average(r['speed'], ws, ws/2)
-        af = ff.moving_average(r['accelerometer x'], ws, ws/2)
+        try:
+            metrics, vf, af, lockup_ranges = get_braking_metrics(r)
+        except TypeError:
+            # skip empty input file
+            continue
         vc = colors[1]
         ac = colors[3]
-        largest_range, all_ranges = trial_braking_indices(af)
-        if largest_range is None:
-            continue
-        else:
-            l0, l1 = largest_range
-            # fit to 10 second window
-            tw = 10
-            tb = t[l1] - t[l0]
-            assert tb < tw
-            # try to center
-            i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
-            i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
-            # shift to left if the braking event can't be centered
-            if i1 > len(r):
-                n = i1 - len(r) + 1
-                i0 -= n
-                i1 -= n
+        l0, l1 = metrics['braking range'][0]
+        # fit to 10 second window
+        tw = 10
+        tb = t[l1] - t[l0]
+        assert tb < tw
+        # try to center
+        i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
+        i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
+        # shift to left if the braking event can't be centered
+        if i1 > len(r):
+            n = i1 - len(r) + 1
+            i0 -= n
+            i1 -= n
 
         ax.plot(t[i0:i1], vf[i0:i1], color=vc,
                 label='velocity, gaussian weighted moving average')
@@ -257,27 +324,19 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
         ax.set_xlabel('time [s]')
         ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
                    linewidth=1,zorder=1)
+        # plot braking section
         ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
+        # plot lockup sections
+        for lr in lockup_ranges:
+            ax.axvspan(t[lr[0]], t[lr[1]], color=colors[7], alpha=0.5)
 
-        # calculate and plot velocity fit
-        # determine if rear wheel is locking up, in this case, measurement is
-        # only of the rear wheel and not the bicycle and rider
-        lockup_indices = np.where((r['speed'] < 0.2) & (af > 3))[0]
-        lockup_ranges = get_contiguous_numbers(lockup_indices)
-        poly_range = set(range(l0, l1))
-        for lr0, lr1 in lockup_ranges:
-            ax.axvspan(t[lr0], t[lr1], color=colors[7], alpha=0.5)
-            poly_range -= set(range(lr0, lr1))
-
-        poly_indices = list(poly_range)
-        p = np.polyfit(t[poly_indices], r['speed'][poly_indices], 1)
+        # plot best fit line
+        p = [metrics['linregress slope'], metrics['linregress intercept']]
         ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
-        st = list(scipy.stats.linregress(t[poly_indices],
-                                         r['speed'][poly_indices]))
-        st.append(t[l1] - t[l0])
-        st.append(vf[l0])
-        # slope, intercept, r-value, p-value, stderr, time, start vel
-        stats.extend(st)
+
+        # fill in rider id
+        metrics['rider id'] = rider_id
+        stats = np.hstack((stats, metrics))
     return fig, axes, recs, stats
 
 
@@ -287,7 +346,7 @@ if __name__ == '__main__':
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
 
-    stats = []
+    stats = np.array([], dtype=braking_metrics_dtype)
     rider_id = range(1, 17)
     if len(sys.argv) > 1:
         rider_id = sys.argv[1:]
@@ -296,26 +355,24 @@ if __name__ == '__main__':
                 r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
         fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
         fig.suptitle('rider {}'.format(rid))
-        stats.extend(st)
-    stats = np.array(stats)
-    stats = stats.reshape((-1, 7))
+        stats = np.hstack((stats, st))
 
-    colors = sns.color_palette('Paired', 10)
-    fig, axes = plt.subplots(2, 2)
-    sns.distplot(stats[:, 0], ax=axes[0][0], color=colors[1], kde=False) # slope
-    axes[0][0].set_title('slope of velocity line fit [m/s^2]')
-    sns.distplot(stats[:, 2]**2, ax=axes[0][1], color=colors[3], kde=False) # r squared
-    axes[0][1].set_title('r-value squared')
-    sns.distplot(stats[:, 5], ax=axes[1][0], color=colors[5], kde=False) # time
-    axes[1][0].set_title('braking event duration [s]')
-    sns.distplot(stats[:, 6], ax=axes[1][1], color=colors[7], kde=False) # velocity
-    axes[1][1].set_title('starting velocity [m/s]')
-    fig.suptitle('histograms of trial braking events')
+    ##colors = sns.color_palette('Paired', 10)
+    ##fig, axes = plt.subplots(2, 2)
+    ##sns.distplot(stats[:, 0], ax=axes[0][0], color=colors[1], kde=False) # slope
+    ##axes[0][0].set_title('slope of velocity line fit [m/s^2]')
+    ##sns.distplot(stats[:, 2]**2, ax=axes[0][1], color=colors[3], kde=False) # r squared
+    ##axes[0][1].set_title('r-value squared')
+    ##sns.distplot(stats[:, 5], ax=axes[1][0], color=colors[5], kde=False) # time
+    ##axes[1][0].set_title('braking event duration [s]')
+    ##sns.distplot(stats[:, 6], ax=axes[1][1], color=colors[7], kde=False) # velocity
+    ##axes[1][1].set_title('starting velocity [m/s]')
+    ##fig.suptitle('histograms of trial braking events')
 
-    g = sns.jointplot(x=stats[:, 0], y=stats[:, 6], color=colors[9])
-    g.set_axis_labels('slope [m/s^2]', 'velocity [m/s]')
-    g.fig.suptitle(
-        'scatterplot of starting velocity and best fit line for braking events')
+    ##g = sns.jointplot(x=stats[:, 0], y=stats[:, 6], color=colors[9])
+    ##g.set_axis_labels('slope [m/s^2]', 'velocity [m/s]')
+    ##g.fig.suptitle(
+    ##    'scatterplot of starting velocity and best fit line for braking events')
 
     #path = os.path.join(os.path.dirname(__file__),
     #                    '../data/20160107-113037_sensor_data.h5')
