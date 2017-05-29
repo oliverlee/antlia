@@ -88,10 +88,11 @@ def calibrate_imu(path, config):
             unit_factor = np.pi/180 # 1 deg/s in rad/s
 
         p0 = np.polyfit([expected] * N, r[n], 0)[0] # zero/1g offset
-        if s == 'accz_g':
-            expected_values = [p0 - 1, p0]
+        if s == signals[2]:
+            expected_values = [p0 - 1, p0] # [0, 1] g
         else:
-            expected_values = [p0, p0 + 1]
+            expected_values = [p0, p0 + 1] # [0, 1] g or deg/s
+        print(s, expected_values)
         p = np.polyfit(expected_values, [0, unit_factor], 1)
         config[s] = p
 
