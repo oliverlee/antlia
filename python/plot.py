@@ -341,6 +341,14 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
 
 
 if __name__ == '__main__':
+    from matplotlib.backends.backend_pdf import PdfPages
+    pp = PdfPages('braking_plots.pdf')
+
+    def save_fig(pp, fig):
+        fig.set_size_inches(12.76, 7.19)
+        fig.tight_layout()
+        pp.savefig()
+
     import record
     import pickle
     with open('config.p', 'rb') as f:
@@ -351,25 +359,26 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         rider_id = sys.argv[1:]
     for rid in rider_id:
-        #path = os.path.join(os.path.dirname(__file__),
-        #        r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
-        #fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
-        #fig.suptitle('rider {}'.format(rid))
-        #stats = np.hstack((stats, st))
         path = os.path.join(os.path.dirname(__file__),
-                r'../data/etrike/experiment/rider{}/convbike/*.csv'.format(rid))
-        filenames = glob.glob(path)
-        for f in filenames:
-            try:
-                r = record.load_file(f, cd['convbike'])
-            except IndexError:
-                continue
-            try:
-                metrics, _, _, _ = get_braking_metrics(r)
-                metrics['rider id'] = rid # FIXME allow rider id to be passed as function input
-            except TypeError:
-                continue
-            stats = np.hstack((stats, metrics))
+                r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
+        fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
+        fig.suptitle('rider {}'.format(rid))
+        stats = np.hstack((stats, st))
+        save_fig(pp, fig)
+        #path = os.path.join(os.path.dirname(__file__),
+        #        r'../data/etrike/experiment/rider{}/convbike/*.csv'.format(rid))
+        #filenames = glob.glob(path)
+        #for f in filenames:
+        #    try:
+        #        r = record.load_file(f, cd['convbike'])
+        #    except IndexError:
+        #        continue
+        #    try:
+        #        metrics, _, _, _ = get_braking_metrics(r)
+        #        metrics['rider id'] = rid # FIXME allow rider id to be passed as function input
+        #    except TypeError:
+        #        continue
+        #    stats = np.hstack((stats, metrics))
 
     colors = sns.husl_palette(6, s=.8, l=.5)
     fig, axes = plt.subplots(2, 3)
@@ -388,6 +397,7 @@ if __name__ == '__main__':
             x = func(x)
         sns.distplot(x, ax=ax, color=c, label=label, kde=False)
         ax.legend()
+    save_fig(pp, fig)
 
     yfields = [('starting velocity', 'm/s'),
                ('braking duration', 'm'),
@@ -416,6 +426,7 @@ if __name__ == '__main__':
                     *scipy.stats.pearsonr(x, y)))
         g.set_axis_labels('slope [m/s^2]', '{} [{}]'.format(yf, unit))
         g.fig.suptitle('scatterplots of braking events')
+        save_fig(pp, fig)
 
     fig, axes = plt.subplots(4, 1, sharex=True)
     fig.suptitle('swarm plot of braking metrics per rider')
@@ -427,6 +438,7 @@ if __name__ == '__main__':
         sns.swarmplot(x=x, y=y, ax=ax);
         ax.set_ylabel('{} [{}]'.format(yf[0], yf[1]))
     ax.set_xlabel('rider id')
+    save_fig(pp, fig)
 
     #path = os.path.join(os.path.dirname(__file__),
     #                    '../data/20160107-113037_sensor_data.h5')
@@ -441,3 +453,4 @@ if __name__ == '__main__':
     #fig.suptitle(path)
 
     plt.show()
+    pp.close()
