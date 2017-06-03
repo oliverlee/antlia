@@ -215,7 +215,8 @@ braking_metrics_dtype = np.dtype([
     ('window size', '<i8'),
     ('braking range', '<i8', 2),
     ('lockup ranges', '<i8'),
-    ('rider id', '<i8')
+    ('rider id', '<i8'),
+    ('trial id', '<i8')
 ])
 
 def get_braking_metrics(rec, window_size=55):
@@ -265,6 +266,7 @@ def get_braking_metrics(rec, window_size=55):
                      window_size,
                      braking_range,
                      len(lockup_ranges),
+                     0,
                      0)], dtype=braking_metrics_dtype),
             filtered_velocity,
             filtered_acceleration,
@@ -280,7 +282,7 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
     recs = []
     stats = np.array([], dtype=braking_metrics_dtype)
     colors = sns.color_palette('Paired', 10)
-    for i, (f, ax) in enumerate(zip(filenames, axes), 1):
+    for trial_id, (f, ax) in enumerate(zip(filenames, axes), 1):
         rider_id = re.search(r'rider([\d]+)/', f).group(1)
         try:
             r = record.load_file(f, calibration_dict)
@@ -319,7 +321,7 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
         ax.plot(t[i0:i1], r['speed'][i0:i1], color=vc, alpha=0.3)
         ax.plot(t[i0:i1], r['accelerometer x'][i0:i1], color=ac, alpha=0.3)
         ax.set_ylim(ylim)
-        ax.set_title('trial {}: {}'.format(i, os.path.basename(f)))
+        ax.set_title('trial {}: {}'.format(trial_id, os.path.basename(f)))
         ax.set_ylabel('m/s, -m/s^2')
         ax.set_xlabel('time [s]')
         ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
@@ -334,8 +336,9 @@ def plot_trial_braking_events(trial_dir, calibration_dict):
         p = [metrics['linregress slope'], metrics['linregress intercept']]
         ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
 
-        # fill in rider id
+        # fill in rider and trial id
         metrics['rider id'] = rider_id
+        metrics['trial id'] = trial_id
         stats = np.hstack((stats, metrics))
     return fig, axes, recs, stats
 
@@ -432,10 +435,25 @@ if __name__ == '__main__':
     fig.suptitle('swarm plot of braking metrics per rider')
     axes = axes.ravel()
     yfields.append(('linregress slope', 'm/s^2'))
+    import pandas as pd
+    df = pd.DataFrame(stats[[
+    'linregress slope',
+    'linregress intercept',
+    'linregress r-value',
+    'linregress p-value',
+    'linregress stderr',
+    'starting velocity',
+    'braking duration',
+    'braking distance',
+    'window size',
+    #'braking range', pandas data frame data must be 1-dimensional
+    'lockup ranges',
+    'rider id',
+    'trial id',
+        ]])
     for yf, ax in zip(yfields, axes):
-        y = stats[yf[0]]
-        x = stats['rider id']
-        sns.swarmplot(x=x, y=y, ax=ax);
+        y = yf[0]
+        sns.swarmplot(x='rider id', y=y, ax=ax, data=df)
         ax.set_ylabel('{} [{}]'.format(yf[0], yf[1]))
     ax.set_xlabel('rider id')
     save_fig(pp, fig)
