@@ -362,26 +362,27 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         rider_id = sys.argv[1:]
     for rid in rider_id:
-        path = os.path.join(os.path.dirname(__file__),
-                r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
-        fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
-        fig.suptitle('rider {}'.format(rid))
-        stats = np.hstack((stats, st))
-        save_fig(pp, fig)
         #path = os.path.join(os.path.dirname(__file__),
-        #        r'../data/etrike/experiment/rider{}/convbike/*.csv'.format(rid))
-        #filenames = glob.glob(path)
-        #for f in filenames:
-        #    try:
-        #        r = record.load_file(f, cd['convbike'])
-        #    except IndexError:
-        #        continue
-        #    try:
-        #        metrics, _, _, _ = get_braking_metrics(r)
-        #        metrics['rider id'] = rid # FIXME allow rider id to be passed as function input
-        #    except TypeError:
-        #        continue
-        #    stats = np.hstack((stats, metrics))
+        #        r'../data/etrike/experiment/rider{}/convbike/'.format(rid))
+        #fig, axes, recs, st = plot_trial_braking_events(path, cd['convbike'])
+        #fig.suptitle('rider {}'.format(rid))
+        #stats = np.hstack((stats, st))
+        #save_fig(pp, fig)
+        path = os.path.join(os.path.dirname(__file__),
+                r'../data/etrike/experiment/rider{}/convbike/*.csv'.format(rid))
+        filenames = glob.glob(path)
+        for trial_id, f in enumerate(filenames, 1):
+            try:
+                r = record.load_file(f, cd['convbike'])
+            except IndexError:
+                continue
+            try:
+                metrics, _, _, _ = get_braking_metrics(r)
+                metrics['rider id'] = rid # FIXME allow rider id to be passed as function input
+                metrics['trial id'] = trial_id
+            except TypeError:
+                continue
+            stats = np.hstack((stats, metrics))
 
     colors = sns.husl_palette(6, s=.8, l=.5)
     fig, axes = plt.subplots(2, 3)
@@ -405,14 +406,16 @@ if __name__ == '__main__':
     yfields = [('starting velocity', 'm/s'),
                ('braking duration', 'm'),
                ('braking distance', 's')]
-    colors = sns.husl_palette(stats['rider id'].max() + 1, l=.7)
-    riders = np.unique(stats['rider id'])
+    #colors = sns.husl_palette(stats['rider id'].max() + 1, l=.7)
+    #riders = np.unique(stats['rider id'])
+    colors = sns.color_palette('deep', stats['trial id'].max() + 1)
+    riders = np.unique(stats['trial id'])
     proxy_lines = []
     for rid in riders:
-        c = colors[rid]
+        c = colors[rid - 1]
         l = matplotlib.lines.Line2D([], [],
                 linestyle='', marker='o', markerfacecolor=c,
-                label='rider {}'.format(rid))
+                label='trial {}'.format(rid))
         proxy_lines.append(l)
 
     for yf in yfields:
@@ -423,7 +426,7 @@ if __name__ == '__main__':
         g.plot_marginals(sns.distplot, kde=False,
                          color=sns.xkcd_palette(['charcoal'])[0])
         g.plot_joint(plt.scatter,
-                     color=list(map(lambda x: colors[x], stats['rider id'])))
+                     color=list(map(lambda x: colors[x - 1], stats['trial id'])))
         g.ax_joint.legend(handles=proxy_lines, ncol=2, title=
                 'pearson r = {:.2g}, p = {:.2g}'.format(
                     *scipy.stats.pearsonr(x, y)))
@@ -451,10 +454,15 @@ if __name__ == '__main__':
     'rider id',
     'trial id',
         ]])
+    legend_drawn = False
     for yf, ax in zip(yfields, axes):
         y = yf[0]
-        sns.swarmplot(x='rider id', y=y, ax=ax, data=df)
+        sns.swarmplot(x='rider id', y=y, ax=ax, data=df, hue='trial id')
         ax.set_ylabel('{} [{}]'.format(yf[0], yf[1]))
+        if not legend_drawn:
+            legend_drawn = True
+        else:
+            ax.legend().remove()
     ax.set_xlabel('rider id')
     save_fig(pp, fig)
 
