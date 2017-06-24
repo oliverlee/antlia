@@ -58,7 +58,7 @@ def plot_fft(rec, k_largest=None, max_freq=None):
 
 
 def plot_bandpass(rec, lowcut, highcut, order=6):
-    colors = sns.color_palette('Paired', 6)
+    colors = sns.color_palette('Paired', 10)
     fs = np.round(1/np.diff(rec['time']).mean())
 
     from scipy.signal import butter, filtfilt
@@ -76,7 +76,7 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
     mod_steer = steer - steer.mean()
     scale = np.abs(filt_steer).mean() / np.abs(mod_steer).mean()
     mod_steer *= scale
-    ax.plot(t, mod_steer, alpha=0.3, color=colors[1],
+    ax.plot(t, mod_steer, color=colors[1], alpha=0.4,
             label='steer, mean subtracted {:0.2f}, scale factor {:0.2f}'.format(
                 steer.mean(), scale))
     ax.plot(t, filt(steer), color=colors[1],
@@ -84,6 +84,9 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
                 'highpass butter fc {:0.2f} Hz order {}, '
                 'lowpass butter fc {:0.2f} Hz order {}').format(
                        lowcut, order, highcut, order))
+    error = filt_steer - mod_steer
+    ax.plot(t, error, color=colors[3], alpha=0.2,
+            label='error between measured and filtered steer angle')
     ax.set_xlabel('time [s]')
     ax.set_ylabel('steer angle [rad]')
     ax.legend()
@@ -92,12 +95,19 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
     first_turn = True
     for event_range in reversed(event_groups):
         for r0, r1 in event_range:
-            if first_turn:
-                alpha = 0.4
-                first_turn = False
+            sum_error = sum(error[r0:r1])
+            sum_filt = sum(filt_steer[r0:r1])
+
+            # if error ratio is too high, discard steering event
+            if sum_error/sum_filt < 0.7:
+                if first_turn:
+                    alpha = 0.4
+                    first_turn = False
+                else:
+                    alpha = 0.2
+                ax.axvspan(t[r0], t[r1], color=colors[5], alpha=alpha)
             else:
-                alpha = 0.2
-            ax.axvspan(t[r0], t[r1], color=colors[5], alpha=alpha)
+                ax.axvspan(t[r0], t[r1], color=colors[7], alpha=0.1)
     return fig, ax
 
 
@@ -138,51 +148,3 @@ def get_steer_event_indices(filt_steer):
             assert False, 'unhandled case'
 
     return merged_range
-
-
-def plot_steer_angle_fft(rec, k_largest=None, max_freq=None):
-    check_valid_record(rec)
-    colors = sns.color_palette('Paired', 6)
-    base_color = colors[1]
-    k_color = colors[5]
-
-    dt = np.diff(rec['time']).mean()
-    # uses hamming window
-    freq, xf = ff.fft(rec['steer angle'], dt)
-
-    if max_freq is None:
-        max_index = len(rec)
-    else:
-        max_index = next(x for x in range(len(freq)) if freq[x] >= max_freq)
-
-    if k_largest is None:
-        k_largest_freq = None
-    else:
-        k_indices = sorted(np.argpartition(xf, -k_largest)[-k_largest:])
-        msg =  '{}th largest element at freq {} Hz'.format(
-                k_largest, freq[k_indices[-1]])
-        assert k_indices[-1] <= max_index, msg
-        k_largest_freq = freq[k_indices]
-
-    indices = slice(0, max_index)
-    fig, ax = plt.subplots()
-    markerline, stemline, baseline = ax.stem(freq[indices],
-                                             xf[indices],
-                                             markerfmt=' ')
-    plt.setp(markerline, 'color', base_color)
-    plt.setp(stemline, 'color', base_color)
-
-    if k_largest is not None:
-        markerline, stemline, baseline = ax.stem(freq[k_indices],
-                                                xf[k_indices],
-                                                markerfmt=' ')
-        plt.setp(markerline, 'color', k_color)
-        plt.setp(stemline, 'color', k_color)
-        proxy = matplotlib.lines.Line2D([], [], color=k_color)
-        ax.legend([proxy],
-                  ['{} largest frequency components'.format(k_largest)])
-
-    ax.set_yscale('log')
-    ax.set_xlabel('frequency [Hz]')
-    ax.set_ylabel('amplitude')
-    return fig, ax, k_largest_freq
