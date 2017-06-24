@@ -88,9 +88,16 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
     ax.set_ylabel('steer angle [rad]')
     ax.legend()
 
-    event_index = get_steer_event_indices(filt_steer)
-    for i0, i1 in event_index:
-        ax.axvspan(t[i0], t[i1], color=colors[5], alpha=0.2)
+    event_groups = get_steer_event_indices(filt_steer)
+    first_turn = True
+    for event_range in reversed(event_groups):
+        for r0, r1 in event_range:
+            if first_turn:
+                alpha = 0.4
+                first_turn = False
+            else:
+                alpha = 0.2
+            ax.axvspan(t[r0], t[r1], color=colors[5], alpha=alpha)
     return fig, ax
 
 
@@ -113,10 +120,10 @@ def get_steer_event_indices(filt_steer):
         assert z0 < z1, 'zero crossings out of order'
 
         if z0 <= r0 and z1 >= r1:
-            if merged_range and (merged_range[-1][1] == z0):
-                merged_range[-1] = (merged_range[-1][0], z1)
+            if merged_range and (merged_range[-1][-1][1] == z0):
+                merged_range[-1].append((z0, z1))
             else:
-                merged_range.append((z0, z1))
+                merged_range.append([(z0, z1)])
             event_range.pop(0)
             zero_crossings = zero_crossings[1:]
         elif z0 >= r0 and z0 <= r1:
@@ -131,3 +138,51 @@ def get_steer_event_indices(filt_steer):
             assert False, 'unhandled case'
 
     return merged_range
+
+
+def plot_steer_angle_fft(rec, k_largest=None, max_freq=None):
+    check_valid_record(rec)
+    colors = sns.color_palette('Paired', 6)
+    base_color = colors[1]
+    k_color = colors[5]
+
+    dt = np.diff(rec['time']).mean()
+    # uses hamming window
+    freq, xf = ff.fft(rec['steer angle'], dt)
+
+    if max_freq is None:
+        max_index = len(rec)
+    else:
+        max_index = next(x for x in range(len(freq)) if freq[x] >= max_freq)
+
+    if k_largest is None:
+        k_largest_freq = None
+    else:
+        k_indices = sorted(np.argpartition(xf, -k_largest)[-k_largest:])
+        msg =  '{}th largest element at freq {} Hz'.format(
+                k_largest, freq[k_indices[-1]])
+        assert k_indices[-1] <= max_index, msg
+        k_largest_freq = freq[k_indices]
+
+    indices = slice(0, max_index)
+    fig, ax = plt.subplots()
+    markerline, stemline, baseline = ax.stem(freq[indices],
+                                             xf[indices],
+                                             markerfmt=' ')
+    plt.setp(markerline, 'color', base_color)
+    plt.setp(stemline, 'color', base_color)
+
+    if k_largest is not None:
+        markerline, stemline, baseline = ax.stem(freq[k_indices],
+                                                xf[k_indices],
+                                                markerfmt=' ')
+        plt.setp(markerline, 'color', k_color)
+        plt.setp(stemline, 'color', k_color)
+        proxy = matplotlib.lines.Line2D([], [], color=k_color)
+        ax.legend([proxy],
+                  ['{} largest frequency components'.format(k_largest)])
+
+    ax.set_yscale('log')
+    ax.set_xlabel('frequency [Hz]')
+    ax.set_ylabel('amplitude')
+    return fig, ax, k_largest_freq
