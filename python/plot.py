@@ -147,7 +147,6 @@ if __name__ == '__main__':
     #    save_fig(fig)
     #    fig, axes = braking.plot_rider_velocities(recs, rid)
     #    save_fig(fig)
-
     #fig, axes = braking.plot_histograms(stats)
     #save_fig(fig)
 

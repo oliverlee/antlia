@@ -87,4 +87,47 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
     ax.set_xlabel('time [s]')
     ax.set_ylabel('steer angle [rad]')
     ax.legend()
+
+    event_index = get_steer_event_indices(filt_steer)
+    for i0, i1 in event_index:
+        ax.axvspan(t[i0], t[i1], color=colors[5], alpha=0.2)
     return fig, ax
+
+
+def get_steer_event_indices(filt_steer):
+    # identify steering event
+    sigma = filt_steer.std()
+    steer_event_indices = np.argwhere(np.abs(filt_steer) > sigma)
+    event_range = util.get_contiguous_numbers(steer_event_indices)
+    zero_crossings = np.insert(
+            np.array([0, len(filt_steer)]),
+            1,
+            np.squeeze(np.argwhere(np.diff(np.sign(filt_steer)))))
+
+    # expand ranges to nearest zero crossing
+    merged_range = []
+    while event_range:
+        r0, r1 = event_range[0]
+        z0, z1 = zero_crossings[:2]
+        assert r0 < r1, 'invalid range'
+        assert z0 < z1, 'zero crossings out of order'
+
+        if z0 <= r0 and z1 >= r1:
+            if merged_range and (merged_range[-1][1] == z0):
+                merged_range[-1] = (merged_range[-1][0], z1)
+            else:
+                merged_range.append((z0, z1))
+            event_range.pop(0)
+            zero_crossings = zero_crossings[1:]
+        elif z0 >= r0 and z0 <= r1:
+            assert False, 'should not have zero crossing within range'
+        elif z1 >= r0 and z1 <= r1:
+            assert False, 'should not have zero crossing within range'
+        elif z1 < r0:
+            zero_crossings = zero_crossings[1:]
+        elif z0 > r1:
+            zero_crossings = zero_crossings[2:]
+        else:
+            assert False, 'unhandled case'
+
+    return merged_range
