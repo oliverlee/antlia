@@ -158,9 +158,18 @@ if __name__ == '__main__':
             fig.suptitle('rider {} trial {}'.format(rid, tid))
 
             k = 10
-            fig, ax, k_freq = steering.plot_steer_angle_fft(r, k, 1.5)
+            fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
             ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
                                                                         tid))
+
+            # sampling frequencies are inconsistent
+            lowcut = k_freq[2]
+            # use largest 'k large frequency' smaller than 0.5 Hz
+            highcut = k_freq[next(x for x in reversed(range(k))
+                                  if k_freq[x] < 0.5)]
+            fig, ax = steering.plot_bandpass(r, lowcut, highcut)
+            ax.set_title('filtered steer angle for rider {} trial {}'.format(
+                rid, tid))
 
     plt.show()
     #pp.close()
