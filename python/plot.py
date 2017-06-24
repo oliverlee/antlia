@@ -11,6 +11,7 @@ import seaborn as sns
 
 import filter as ff
 import plot_braking as braking
+import plot_steering as steering
 import util
 
 
@@ -155,6 +156,11 @@ if __name__ == '__main__':
         if tid == 4:
             fig, axes = plot_timeseries(r)
             fig.suptitle('rider {} trial {}'.format(rid, tid))
+
+            k = 10
+            fig, ax, k_freq = steering.plot_steer_angle_fft(r, k, 1.5)
+            ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
+                                                                        tid))
 
     plt.show()
     #pp.close()
