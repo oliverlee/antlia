@@ -122,7 +122,7 @@ def make_stats(recs, dtype):
             # so we need to add them here
             metrics['rider id'] = rid
             metrics['trial id'] = tid
-        except TypeError:
+        except (TypeError, AssertionError):
             continue
         stats = np.hstack((stats, metrics))
     return stats
@@ -176,6 +176,7 @@ if __name__ == '__main__':
                 rid, tid))
 
     fig, axes = steering.plot_histograms(stats)
+    fig, axes = steering.plot_bivariates(stats)
     fig, axes = steering.plot_swarms(stats)
 
     plt.show()

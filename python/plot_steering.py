@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import numpy as np
+import scipy.stats
 import matplotlib.lines
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -184,6 +185,7 @@ def get_metrics(rec, window_size=55):
                                        window_size,
                                        window_size/2)
                 v0 = vf[r0]
+                assert v0 > 1.0, 'velocity is too low'
                 break
         if first_turn:
             break
@@ -251,6 +253,37 @@ def plot_histograms(stats):
         sns.distplot(x, ax=ax, color=c, label=label, kde=False)
         ax.legend()
     return fig, axes
+
+
+def plot_bivariates(stats):
+    colors = sns.husl_palette(stats['rider id'].max() + 1, l=.7)
+    riders = np.unique(stats['rider id'])
+    proxy_lines = []
+    for rid in riders:
+        c = colors[rid - 1]
+        l = matplotlib.lines.Line2D([], [],
+                linestyle='', marker='o', markerfacecolor=c,
+                label='rider {}'.format(rid))
+        proxy_lines.append(l)
+
+    grids = []
+    for yf in yfields[:-1]:
+        name, unit = yf
+        x = stats['starting velocity']
+        y = stats[name]
+        g = sns.JointGrid(x=x, y=y)
+        g.plot_marginals(sns.distplot, kde=False,
+                         color=sns.xkcd_palette(['charcoal'])[0])
+        g.plot_joint(plt.scatter,
+                     color=list(map(lambda x: colors[x - 1], stats['rider id'])))
+        g.ax_joint.legend(handles=proxy_lines, ncol=2, title=
+                'pearson r = {:.2g}, p = {:.2g}'.format(
+                    *scipy.stats.pearsonr(x, y)))
+        g.set_axis_labels('starting velocity [m/s]', '{} [{}]'.format(name, unit))
+        g.fig.suptitle('scatterplots of steering events')
+        g.fig.set_size_inches(12.76, 7.19) # fix size for pdf save
+        grids.append(g)
+    return grids
 
 
 def plot_swarms(stats):
