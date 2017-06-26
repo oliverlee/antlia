@@ -112,7 +112,12 @@ def make_stats(recs, dtype):
     stats = np.array([], dtype)
     for rid, tid, r in recs:
         try:
-            metrics, _, _, _ = braking.get_braking_metrics(r)
+            if dtype == braking.metrics_dtype:
+                metrics, _, _, _ = braking.get_metrics(r)
+            elif dtype == steering.metrics_dtype:
+                if tid != 4:
+                    continue
+                metrics = steering.get_metrics(r)
             # rider id and trial id aren't available within the record datatype
             # so we need to add them here
             metrics['rider id'] = rid
@@ -140,7 +145,7 @@ if __name__ == '__main__':
     recs = load_records()
 
     ## braking plots
-    #stats = make_stats(recs, braking.braking_metrics_dtype)
+    #stats = make_stats(recs, braking.metrics_dtype)
 
     #for rid in range(1, 17):
     #    fig, axes = braking.plot_rider_braking_events(recs, rid)
@@ -151,6 +156,8 @@ if __name__ == '__main__':
     #save_fig(fig)
 
     ## steering plots
+    stats = make_stats(recs, steering.metrics_dtype)
+
     for rid, tid, r in recs:
         if tid == 4:
             fig, axes = plot_timeseries(r)
@@ -160,15 +167,12 @@ if __name__ == '__main__':
             fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
             ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
                                                                         tid))
-
-            # sampling frequencies are inconsistent
-            lowcut = k_freq[2]
-            # use largest 'k large frequency' smaller than 0.5 Hz
-            highcut = k_freq[next(x for x in reversed(range(k))
-                                  if k_freq[x] < 0.5)]
-            fig, ax = steering.plot_bandpass(r, lowcut, highcut)
+            fig, ax = steering.plot_filtered(r)
             ax.set_title('filtered steer angle for rider {} trial {}'.format(
                 rid, tid))
+
+    fig, axes = steering.plot_histograms(stats)
+    fig, axes = steering.plot_swarms(stats)
 
     plt.show()
     #pp.close()

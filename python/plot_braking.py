@@ -9,7 +9,7 @@ import seaborn as sns
 import filter as ff
 import util
 
-braking_metrics_dtype = np.dtype([
+metrics_dtype = np.dtype([
     ('linregress slope', '<f8'),
     ('linregress intercept', '<f8'),
     ('linregress r-value', '<f8'),
@@ -62,7 +62,7 @@ def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
     return largest, merged
 
 
-def get_braking_metrics(rec, window_size=55):
+def get_metrics(rec, window_size=55):
     """ window size in samples
         ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
     """
@@ -110,7 +110,7 @@ def get_braking_metrics(rec, window_size=55):
                      braking_range,
                      len(lockup_ranges),
                      0,
-                     0)], dtype=braking_metrics_dtype),
+                     0)], dtype=metrics_dtype),
             filtered_velocity,
             filtered_acceleration,
             lockup_ranges)
@@ -165,7 +165,7 @@ def plot_rider_braking_events(recs, rider_id):
             continue
         t = r['time']
         try:
-            metrics, vf, af, lockup_ranges = get_braking_metrics(r)
+            metrics, vf, af, lockup_ranges = get_metrics(r)
         except TypeError:
             # skip empty input file
             continue
