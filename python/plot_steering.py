@@ -58,7 +58,7 @@ def plot_fft(rec, k_largest=None, max_freq=None):
 
 
 def plot_bandpass(rec, lowcut, highcut, order=6):
-    colors = sns.color_palette('Paired', 10)
+    colors = sns.color_palette('Paired', 12)
     fs = np.round(1/np.diff(rec['time']).mean())
 
     from scipy.signal import butter, filtfilt
@@ -89,7 +89,6 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
             label='error between measured and filtered steer angle')
     ax.set_xlabel('time [s]')
     ax.set_ylabel('steer angle [rad]')
-    ax.legend()
 
     event_groups = get_steer_event_indices(filt_steer)
     first_turn = True
@@ -103,11 +102,23 @@ def plot_bandpass(rec, lowcut, highcut, order=6):
                 if first_turn:
                     alpha = 0.4
                     first_turn = False
+                    amplitude = np.abs(filt_steer[r0:r1]).max()
+                    period = 2*(t[r1] - t[r0])
+                    ax.plot(t[r0:r1],
+                            (np.sign(filt_steer[int(r0 + r1)//2])*
+                                amplitude*np.sin(2*np.pi/period*
+                                    (t[r0:r1] - t[r0]))),
+                            color=colors[9],
+                            label=(
+                                'sinusoid fit, '
+                                'amplitude {:0.2f}, period {:0.2f}'.format(
+                                    amplitude, period)))
                 else:
                     alpha = 0.2
                 ax.axvspan(t[r0], t[r1], color=colors[5], alpha=alpha)
             else:
                 ax.axvspan(t[r0], t[r1], color=colors[7], alpha=0.1)
+    ax.legend()
     return fig, ax
 
 
