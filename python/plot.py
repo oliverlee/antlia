@@ -115,7 +115,7 @@ def make_stats(recs, dtype):
             if dtype == braking.metrics_dtype:
                 metrics, _, _, _ = braking.get_metrics(r)
             elif dtype == steering.metrics_dtype:
-                if tid != 4:
+                if not (tid == 3 or tid == 4):
                     continue
                 metrics = steering.get_metrics(r)
             # rider id and trial id aren't available within the record datatype
@@ -159,12 +159,16 @@ if __name__ == '__main__':
     stats = make_stats(recs, steering.metrics_dtype)
 
     for rid, tid, r in recs:
-        if tid == 4:
+        if tid == 3 or tid == 4:
             fig, axes = plot_timeseries(r)
             fig.suptitle('rider {} trial {}'.format(rid, tid))
 
             k = 10
-            fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
+            try:
+                fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
+            except AssertionError:
+                # kth highest frequency is greater than 1.5 Hz
+                continue
             ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
                                                                         tid))
             fig, ax = steering.plot_filtered(r)
