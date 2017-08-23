@@ -140,7 +140,7 @@ if __name__ == '__main__':
     def save_fig(fig):
         fig.set_size_inches(12.76, 7.19)
         fig.tight_layout()
-        pp.savefig()
+        pp.savefig(fig)
 
     import record
     import pickle
@@ -183,8 +183,7 @@ if __name__ == '__main__':
 
     #        fig, ax = steering.plot_filtered(r)
     #        ax.set_title('filtered steer angle for rider {} trial {}'.format(
-    #            rid, tid))
-    #        save_fig(fig)
+    #            rid, tid)) #        save_fig(fig)
 
     #fig, axes = steering.plot_histograms(stats)
     #save_fig(fig)
@@ -197,13 +196,19 @@ if __name__ == '__main__':
     ## trajectory plots
     for rid, tid, r in recs:
         if tid == 3 or tid == 4:
-            fig, axes = path.get_trajectory(r,
-                                            velocity_window_size=55,
-                                            yaw_rate_window_size=11,
-                                            plot=True)
+            soln, fig, axes, fig2, ax2 = path.get_trajectory(
+                    r,
+                    velocity_window_size=101,
+                    yaw_rate_window_size=11,
+                    plot=True)
             fig.suptitle('filtered signals rider {} trial {}'.format(
                 rid, tid))
             save_fig(fig)
 
-    plt.show()
+            fig2.suptitle('trajectory rider {} trial {}'.format(rid, tid))
+            save_fig(fig2)
+            print('generated trajectory {} {}'.format(rid, tid))
+            plt.close('all')
+
+    #plt.show()
     pp.close()
