@@ -170,6 +170,7 @@ def get_metrics(rec, window_size=55):
     t = rec['time']
     steer = rec['steer angle']
     filt_steer, _, lowcut, _, _ = filtered_steer(rec)
+    filt_steer -= steer.mean()
     mod_steer = steer - steer.mean()
     error = filt_steer - mod_steer
 
@@ -181,16 +182,17 @@ def get_metrics(rec, window_size=55):
             sum_filt = sum(filt_steer[r0:r1])
 
             # if error ratio is too high, discard steering event
-            if sum_error/sum_filt < ERROR_RATIO and event_range > 1:
-                first_turn = True
-                amplitude = np.abs(filt_steer[r0:r1]).max()
-                period = 2*(t[r1] - t[r0])
-                vf = ff.moving_average(rec['speed'],
-                                       window_size,
-                                       window_size/2)
-                v0 = vf[r0]
-                assert v0 > 1.0, 'velocity is too low'
-                break
+            if sum_error/sum_filt < ERROR_RATIO:
+                if not first_turn and len(event_range) > 1:
+                    first_turn = True
+                    amplitude = np.abs(filt_steer[r0:r1]).max()
+                    period = 2*(t[r1] - t[r0])
+                    vf = ff.moving_average(rec['speed'],
+                                           window_size,
+                                           window_size/2)
+                    v0 = vf[r0]
+                    assert v0 > 1.0, 'velocity is too low'
+                    break
         if first_turn:
             break
 

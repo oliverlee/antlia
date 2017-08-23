@@ -124,19 +124,21 @@ def make_stats(recs, dtype):
             metrics['rider id'] = rid
             metrics['trial id'] = tid
         except (TypeError, AssertionError):
+        #except TypeError:
             continue
         stats = np.hstack((stats, metrics))
     return stats
 
 
 if __name__ == '__main__':
-    #from matplotlib.backends.backend_pdf import PdfPages
+    from matplotlib.backends.backend_pdf import PdfPages
     #pp = PdfPages('braking_plots.pdf')
+    pp = PdfPages('steering_plots.pdf')
 
-    #def save_fig(fig):
-    #    fig.set_size_inches(12.76, 7.19)
-    #    fig.tight_layout()
-    #    pp.savefig()
+    def save_fig(fig):
+        fig.set_size_inches(12.76, 7.19)
+        fig.tight_layout()
+        pp.savefig()
 
     import record
     import pickle
@@ -157,29 +159,38 @@ if __name__ == '__main__':
     #save_fig(fig)
 
     ## steering plots
-    #stats = make_stats(recs, steering.metrics_dtype)
+    stats = make_stats(recs, steering.metrics_dtype)
 
     for rid, tid, r in recs:
-        #if tid == 3 or tid == 4:
-        if tid == 4:
-            #fig, axes = plot_timeseries(r)
-            #fig.suptitle('rider {} trial {}'.format(rid, tid))
+        if tid == 3 or tid == 4:
+        #if tid == 4:
+            fig, axes = plot_timeseries(r)
+            fig.suptitle('rider {} trial {}'.format(rid, tid))
+            save_fig(fig)
 
             k = 10
             try:
                 fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
             except AssertionError:
-                # kth highest frequency is greater than 1.5 Hz
+                print('kth highest frequency is greater than 1.5 Hz '
+                      'for rider {} trial {}'.format(rid, tid))
                 continue
             ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
                                                                         tid))
+            save_fig(fig)
+
             fig, ax = steering.plot_filtered(r)
             ax.set_title('filtered steer angle for rider {} trial {}'.format(
                 rid, tid))
+            save_fig(fig)
 
-    #fig, axes = steering.plot_histograms(stats)
-    #fig, axes = steering.plot_bivariates(stats)
-    #fig, axes = steering.plot_swarms(stats)
+    fig, axes = steering.plot_histograms(stats)
+    save_fig(fig)
+    grids = steering.plot_bivariates(stats)
+    for g in grids:
+        save_fig(g.fig)
+    fig, axes = steering.plot_swarms(stats)
+    save_fig(fig)
 
     plt.show()
-    #pp.close()
+    pp.close()
