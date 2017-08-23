@@ -200,7 +200,8 @@ if __name__ == '__main__':
                     r,
                     velocity_window_size=101,
                     yaw_rate_window_size=11,
-                    plot=True)
+                    plot=True,
+                    trial_id=tid)
             fig.suptitle('filtered signals rider {} trial {}'.format(
                 rid, tid))
             save_fig(fig)
@@ -208,7 +209,6 @@ if __name__ == '__main__':
             fig2.suptitle('trajectory rider {} trial {}'.format(rid, tid))
             save_fig(fig2)
             print('generated trajectory {} {}'.format(rid, tid))
-            plt.close('all')
 
     #plt.show()
     pp.close()

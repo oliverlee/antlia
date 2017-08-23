@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import scipy.integrate
+import matplotlib.patches
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -9,7 +10,9 @@ import filter as ff
 import util
 
 
-def get_trajectory(r, velocity_window_size, yaw_rate_window_size, plot=False):
+def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
+                  plot=False, trial_id=None):
+    charcoal_color = sns.xkcd_palette(['charcoal'])[0]
     vf = ff.moving_average(r['speed'],
                            velocity_window_size,
                            velocity_window_size/2)
@@ -38,7 +41,7 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size, plot=False):
             ax.set_ylim(ylim)
             ax.legend()
             ax.set_ylabel(l[-1])
-            ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
+            ax.axhline(0, color=charcoal_color,
                        linewidth=1, zorder=1)
         ax.set_xlabel('time [s]')
 
@@ -58,18 +61,44 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size, plot=False):
         x = soln[:, 0]
         y = soln[:, 1]
         yaw = soln[:, 2]
-        axes2[0].plot(t, yaw, color=colors[7], label='yaw angle')
-        axes2[0].axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
-                         linewidth=1, zorder=1)
-        axes2[0].legend()
+        ax = axes2[0]
+        ax.plot(t, yaw, color=colors[7], label='yaw angle')
+        ax.axhline(0, color=charcoal_color, linewidth=1, zorder=1)
+        ax.legend()
 
-        axes2[1].plot(x, y, color=colors[0], label='trajectory')
-        axes2[1].set(aspect='equal')
-        ylim = axes2[1].get_ylim()
-        axes2[1].set_ylim([ylim[0] - 5, ylim[1] + 5])
-        axes2[1].plot([0, 128], [0, 0], color=sns.xkcd_palette(['charcoal'])[0],
-                      label='trial length', linewidth=2, zorder=1)
-        axes2[1].legend()
+        ax = axes2[1]
+        ax.plot(x, y, color=colors[0], label='trajectory')
+        ax.set(aspect='equal')
+        ylim = ax.get_ylim()
+        ax.set_ylim([ylim[0] - 5, ylim[1] + 5])
+        ax.plot([0, 128], [0, 0], color=charcoal_color,
+                label='trial path', linewidth=2, zorder=1)
+        if trial_id == 3:
+            num_cones = 2
+            start_x = 60
+            step_x = 5
+        elif trial_id == 4:
+            num_cones = 4
+            start_x = 120 - 10
+            step_x = -3
+
+        cones = []
+        circ_radius = 0.5
+        for i in range(num_cones):
+            circle = matplotlib.patches.Circle(
+                    (start_x + i*step_x, 0),
+                    circ_radius,
+                    color=colors[1],
+                    label='cones')
+            cones.append(circle)
+            ax.add_artist(circle)
+
+        if cones:
+            handles, _ = ax.get_legend_handles_labels()
+            handles += cones[0:1]
+            ax.legend(handles=handles)
+        else:
+            ax.legend()
 
         return soln, fig, axes, fig2, axes2
     return soln
