@@ -14,6 +14,7 @@ metrics_dtype = np.dtype([
     ('sinusoid period', '<f8'),
     ('starting velocity', '<f8'),
     ('starting steer range', '<i8', 2),
+    ('filter cutoff', '<f8'),
     ('rider id', '<i8'),
     ('trial id', '<i8')
 ])
@@ -86,22 +87,23 @@ def filtered_steer(rec):
     k_largest_freq = freq[k_indices]
 
     # sampling frequencies are inconsistent
-    lowcut = k_largest_freq[2]
-    # use largest 'k large frequency' smaller than 0.5 Hz
-    highcut = k_largest_freq[next(x for x in reversed(range(k_largest))
-                                  if k_largest_freq[x] < 0.5)]
+    #lowcut = k_largest_freq[2]
+    # use largest 'k largest frequency' smaller than 0.7 Hz
+    lowcut = k_largest_freq[next(x for x in reversed(range(k_largest))
+                            if k_largest_freq[x] < 0.7)]
 
-    from scipy.signal import butter, filtfilt
+    from scipy.signal import filtfilt, iirfilter
     t = rec['time']
     steer = rec['steer angle']
     fs = np.round(1/np.diff(t).mean())
     nyq = 0.5*fs
     low = lowcut/nyq
-    high = highcut/nyq
-    order = 6
-    bh, ah = butter(order, low, btype='highpass')
-    bl, al = butter(order, high, btype='lowpass')
-    return filtfilt(bh, ah, filtfilt(bl, al, steer)), lowcut, highcut
+    order = 4
+    ripple_pass = 1
+    ripple_stop = 10
+    b, a = iirfilter(order, low, rp=ripple_pass, rs=ripple_stop,
+                     btype='lowpass', analog=False, ftype='butter')
+    return filtfilt(b, a, steer), order, lowcut, ripple_pass, ripple_stop
 
 
 def plot_filtered(rec):
@@ -110,19 +112,16 @@ def plot_filtered(rec):
     fig, ax = plt.subplots()
     t = rec['time']
     steer = rec['steer angle']
-    filt_steer, lowcut, highcut = filtered_steer(rec)
+    filt_steer, order, lowcut, ripple_pass, ripple_stop = filtered_steer(rec)
+    filt_steer -= steer.mean()
     mod_steer = steer - steer.mean()
-    scale = np.abs(filt_steer).mean() / np.abs(mod_steer).mean()
-    mod_steer *= scale
     ax.plot(t, mod_steer, color=colors[1], alpha=0.4,
-            label='steer, mean subtracted {:0.2f}, scale factor {:0.2f}'.format(
-                steer.mean(), scale))
-    order = 6
+            label='steer, mean subtracted {:0.2f}'.format(steer.mean()))
     ax.plot(t, filt_steer, color=colors[1],
-            label=('steer, '
-                'highpass butter fc {:0.2f} Hz order {}, '
-                'lowpass butter fc {:0.2f} Hz order {}').format(
-                       lowcut, order, highcut, order))
+            label=('steer, lowpass butter '
+                'order {:d}, fc {:0.2f} Hz, rs {:0.2f}, rp {:0.2f}'
+                ', mean subtracted'
+                ).format(order, lowcut, ripple_pass, ripple_stop))
     error = filt_steer - mod_steer
     ax.plot(t, error, color=colors[3], alpha=0.2,
             label='error between measured and filtered steer angle')
@@ -134,12 +133,17 @@ def plot_filtered(rec):
     first_turn = True
     for event_range in reversed(event_groups):
         for r0, r1 in event_range:
+            # don't plot past the end of the data
+            if r1 >= len(t):
+                r1 = len(t) - 1
+
             sum_error = sum(error[r0:r1])
             sum_filt = sum(filt_steer[r0:r1])
 
             # if error ratio is too high, discard steering event
             if sum_error/sum_filt < ERROR_RATIO:
-                if first_turn:
+                # the first turn should be adjacent to other ranges
+                if first_turn and len(event_range) > 1:
                     alpha = 0.4
                     first_turn = False
                     amplitude = np.abs(filt_steer[r0:r1]).max()
@@ -165,7 +169,7 @@ def plot_filtered(rec):
 def get_metrics(rec, window_size=55):
     t = rec['time']
     steer = rec['steer angle']
-    filt_steer, _, _ = filtered_steer(rec)
+    filt_steer, _, lowcut, _, _ = filtered_steer(rec)
     mod_steer = steer - steer.mean()
     error = filt_steer - mod_steer
 
@@ -177,7 +181,7 @@ def get_metrics(rec, window_size=55):
             sum_filt = sum(filt_steer[r0:r1])
 
             # if error ratio is too high, discard steering event
-            if sum_error/sum_filt < ERROR_RATIO:
+            if sum_error/sum_filt < ERROR_RATIO and event_range > 1:
                 first_turn = True
                 amplitude = np.abs(filt_steer[r0:r1]).max()
                 period = 2*(t[r1] - t[r0])
@@ -190,10 +194,12 @@ def get_metrics(rec, window_size=55):
         if first_turn:
             break
 
+    assert first_turn, 'turn not detected'
     return np.array([(amplitude,
                       period,
                       v0,
                       (r0, r1),
+                      lowcut,
                       0,
                       0)], dtype=metrics_dtype)
 
@@ -212,6 +218,14 @@ def get_steer_event_indices(filt_steer):
     merged_range = []
     while event_range:
         r0, r1 = event_range[0]
+
+        # may have the case where the event range is already contained
+        # within the merged range
+        if merged_range:
+            m0, m1 = merged_range[-1][-1]
+            if m0 <= r0 and m1 >= r1:
+                event_range.pop(0)
+                continue
         z0, z1 = zero_crossings[:2]
         assert r0 < r1, 'invalid range'
         assert z0 < z1, 'zero crossings out of order'

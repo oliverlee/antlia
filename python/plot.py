@@ -115,7 +115,8 @@ def make_stats(recs, dtype):
             if dtype == braking.metrics_dtype:
                 metrics, _, _, _ = braking.get_metrics(r)
             elif dtype == steering.metrics_dtype:
-                if not (tid == 3 or tid == 4):
+                #if not (tid == 3 or tid == 4):
+                if not tid == 4:
                     continue
                 metrics = steering.get_metrics(r)
             # rider id and trial id aren't available within the record datatype
@@ -156,12 +157,13 @@ if __name__ == '__main__':
     #save_fig(fig)
 
     ## steering plots
-    stats = make_stats(recs, steering.metrics_dtype)
+    #stats = make_stats(recs, steering.metrics_dtype)
 
     for rid, tid, r in recs:
-        if tid == 3 or tid == 4:
-            fig, axes = plot_timeseries(r)
-            fig.suptitle('rider {} trial {}'.format(rid, tid))
+        #if tid == 3 or tid == 4:
+        if tid == 4:
+            #fig, axes = plot_timeseries(r)
+            #fig.suptitle('rider {} trial {}'.format(rid, tid))
 
             k = 10
             try:
@@ -175,9 +177,9 @@ if __name__ == '__main__':
             ax.set_title('filtered steer angle for rider {} trial {}'.format(
                 rid, tid))
 
-    fig, axes = steering.plot_histograms(stats)
-    fig, axes = steering.plot_bivariates(stats)
-    fig, axes = steering.plot_swarms(stats)
+    #fig, axes = steering.plot_histograms(stats)
+    #fig, axes = steering.plot_bivariates(stats)
+    #fig, axes = steering.plot_swarms(stats)
 
     plt.show()
     #pp.close()
