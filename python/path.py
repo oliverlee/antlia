@@ -45,6 +45,11 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
                        linewidth=1, zorder=1)
         ax.set_xlabel('time [s]')
 
+    def f(y, t):
+        i = np.argmax(r['time'] >= t)
+        return yf[i]
+    yaw_angle = scipy.integrate.odeint(f, 0, r['time'])
+
     def func(y, t):
         xp, yp, yaw = y
         i = np.argmax(r['time'] >= t)
@@ -54,7 +59,7 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
         dydt = [v*np.cos(yaw), v*np.sin(yaw), yf[i]]
         return dydt
 
-    soln = scipy.integrate.odeint(func, [0, 0, 0], r['time'])
+    soln = scipy.integrate.odeint(func, [0, 0, -yaw_angle.mean()], r['time'])
 
     if plot:
         fig2, axes2 = plt.subplots(2, 1)
@@ -96,9 +101,9 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
         if cones:
             handles, _ = ax.get_legend_handles_labels()
             handles += cones[0:1]
-            ax.legend(handles=handles)
+            ax.legend(handles=handles, loc='center left')
         else:
-            ax.legend()
+            ax.legend(loc='center left')
 
         return soln, fig, axes, fig2, axes2
     return soln
