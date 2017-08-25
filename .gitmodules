@@ -1,0 +1,3 @@
+[submodule "submodules/madgwick_py.git"]
+	path = python/madgwick_py
+	url = https://github.com/morgil/madgwick_py.git

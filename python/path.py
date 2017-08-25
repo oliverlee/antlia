@@ -9,6 +9,7 @@ import seaborn as sns
 
 import filter as ff
 import util
+from madgwick_py.madgwickahrs import MadgwickAHRS
 
 
 def plot_velocity(r, velocity_window_size):
@@ -71,6 +72,23 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
                            yaw_rate_window_size,
                            yaw_rate_window_size/2)
 
+    imu = MadgwickAHRS(sampleperiod=1/125)
+    madgwick_roll = []
+    madgwick_pitch = []
+    madgwick_yaw = []
+    for i in range(len(r)):
+        imu.update_imu(
+                [r[i]['gyroscope x'],
+                 r[i]['gyroscope y'],
+                 r[i]['gyroscope z']],
+                [r[i]['accelerometer x'],
+                 r[i]['accelerometer y'],
+                 r[i]['accelerometer z']])
+        q1, q2, q3 = imu.quaternion.to_euler123() # TODO: Verify this
+        madgwick_roll.append(q1)
+        madgwick_pitch.append(q2)
+        madgwick_yaw.append(q3)
+
     if plot:
         colors = sns.color_palette('husl', 8)
         fig, axes = plt.subplots(2, 1, sharex=True)
@@ -112,18 +130,35 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
 
     soln = scipy.integrate.odeint(func, [0, 0, -yaw_angle.mean()], r['time'])
 
+    madgwick_yaw = np.array(madgwick_yaw)
+    madgwick_yaw -= madgwick_yaw.mean()
+    def func2(y, t):
+        xp, yp = y
+        i = np.argmax(r['time'] >= t)
+        v = vf[i]
+        yaw = madgwick_yaw[i]
+        dydt = [v*np.cos(yaw), v*np.sin(yaw)]
+        return dydt
+    soln2 = scipy.integrate.odeint(func2, [0, 0], r['time'])
+
     if plot:
         fig2, axes2 = plt.subplots(2, 1)
         x = soln[:, 0]
         y = soln[:, 1]
         yaw = soln[:, 2]
+        x2 = soln2[:, 0]
+        y2 = soln2[:, 1]
+
         ax = axes2[0]
         ax.plot(t, yaw, color=colors[7], label='yaw angle')
+        ax.plot(t, madgwick_yaw, color=colors[6], alpha=0.8,
+                label='yaw angle, Madgwick IMU filter')
         ax.axhline(0, color=charcoal_color, linewidth=1, zorder=1)
         ax.legend()
 
         ax = axes2[1]
-        ax.plot(x, y, color=colors[0], label='trajectory')
+        ax.plot(x, y, color=colors[7], label='trajectory')
+        ax.plot(x2, y2, color=colors[6], label='trajectory (madgwick yaw)')
         ax.set(aspect='equal')
         ylim = ax.get_ylim()
         ax.set_ylim([ylim[0] - 5, ylim[1] + 5])
