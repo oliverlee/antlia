@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import scipy.integrate
-#import scipy.signal
+import scipy.signal
 import matplotlib.patches
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -29,6 +29,7 @@ def plot_velocity(r, velocity_window_size):
     #w0 = f0/(fs/2) # normalized frequency
     #b, a = scipy.signal.iirnotch(w0, Q)
     #vf2 = scipy.signal.filtfilt(b, a, v)
+    vf2 = scipy.signal.savgol_filter(v, window_length=111, polyorder=5, deriv=0)
 
     colors = sns.color_palette('husl', 8)
     fig, axes = plt.subplots(2, 1)
@@ -39,9 +40,8 @@ def plot_velocity(r, velocity_window_size):
     ax.plot(t, vf, color=colors[1],
             label='velocity, gaussian weighted moving average, {} samples'.format(
                 velocity_window_size))
-    #ax.plot(t, vf2, color=colors[3],
-    #        label='velocity, notch filter, f0: {} Hz, Q: {}'.format(
-    #            f0, Q))
+    ax.plot(t, vf2, color=colors[3],
+            label='velocity, savgol filter (111, 5, 0)')
     ax.set_xlabel('time [s]')
     ax.set_ylabel('velocity [m/s]')
     ax.axhline(0, color=charcoal_color, linewidth=1, zorder=1)
@@ -49,14 +49,14 @@ def plot_velocity(r, velocity_window_size):
 
     freq, xf = ff.fft(v, dt) # uses hamming window
     freq, xf1 = ff.fft(vf, dt) # uses hamming window
-    #freq, xf2 = ff.fft(vf2, dt) # uses hamming window
+    freq, xf2 = ff.fft(vf2, dt) # uses hamming window
 
     ax = axes[1]
     #markerline, stemline, baseline = ax.stem(freq, xf, markerfmt=' ')
     #plt.setp(stemline, 'color', colors[1], 'alpha', 0.3)
     ax.plot(freq, xf, color=colors[0], alpha=0.3)
     ax.plot(freq, xf1, color=colors[1])
-    #ax.plot(freq, xf2, color=colors[3])
+    ax.plot(freq, xf2, color=colors[3])
     ax.set_yscale('log')
     ax.set_xlabel('frequency [Hz]')
     ax.set_ylabel('amplitude')
