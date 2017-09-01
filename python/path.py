@@ -17,6 +17,7 @@ def plot_velocity(r, velocity_window_size):
 
     t = r['time']
     v = r['speed']
+    a = r['accelerometer x']
     dt = np.diff(t).mean()
 
     vf = ff.moving_average(v,
@@ -31,7 +32,66 @@ def plot_velocity(r, velocity_window_size):
     #vf2 = scipy.signal.filtfilt(b, a, v)
     vf2 = scipy.signal.savgol_filter(v, window_length=111, polyorder=5, deriv=0)
 
-    colors = sns.color_palette('husl', 8)
+    q = 5
+    Ad = np.array([
+        [1, dt],
+        [0,  1]
+    ])
+    Bd = np.array([
+        [1/2*dt**2],
+        [dt],
+    ])
+    Cd = np.array([
+        [0, 1],
+    ])
+    Q = q * np.array([
+        [1/4*dt**4, 1/2*dt**3],
+        [1/2*dt**3,    dt**2]
+    ])
+    """
+    Find variance at 'constant' speed section
+    In [12]: r['speed'][np.argwhere(
+        r['time'] > 16)[0][0]:np.argwhere(r['time'] > 21)[0][0]].var()
+    Out[12]: 0.64835952938689101
+    """
+    R = np.array([
+        [0.6483595]
+    ])
+    u = np.reshape(a, (-1, 1, 1))
+    z = np.reshape(v, (-1, 1, 1))
+    n = z.shape[0]
+
+    xhat = np.zeros((n, Ad.shape[0], 1))
+    xhatminus = np.zeros(xhat.shape)
+    P = np.zeros((n,) + Ad.shape)
+    Pminus = np.zeros(P.shape)
+    K = np.zeros((n,) + tuple(reversed(Cd.shape)))
+
+    x0 = np.zeros((2, 1))
+    P0 = np.zeros((2, 2))
+
+    for i in range(n):
+        # time update
+        if i == 0:
+            xhatminus[i, :] = np.dot(Ad, x0)
+            Pminus[i, :] = np.dot(np.dot(Ad, P0), Ad.T) + Q
+        else:
+            # time update state
+            xhatminus[i, :] = np.dot(Ad, xhat[i - 1, :])
+            # time update error covariance
+            Pminus[i, :] = np.dot(np.dot(Ad, P[i - 1, :]), Ad.T) + Q
+
+        # measurement update
+        # measurement update kalman gain
+        S = np.dot(np.dot(Cd, Pminus[i, :]), Cd.T) + R
+        K[i, :] = np.linalg.lstsq(S, np.dot(Cd, Pminus[i, :].T))[0].T
+        # measurement update state
+        xhat[i, :] = (xhatminus[i, :] +
+                      np.dot(K[i, :], (z[i, :] - np.dot(Cd, xhatminus[i, :]))))
+        P[i, :] = np.dot(np.eye(Ad.shape[0]) - np.dot(K[i, :], Cd), Pminus[i, :])
+    vf3 = np.squeeze(xhat[:, 1])
+
+    colors = sns.color_palette('husl', 6)
     fig, axes = plt.subplots(2, 1)
     axes = axes.ravel()
     ax = axes[0]
@@ -42,6 +102,8 @@ def plot_velocity(r, velocity_window_size):
                 velocity_window_size))
     ax.plot(t, vf2, color=colors[3],
             label='velocity, savgol filter (111, 5, 0)')
+    ax.plot(t, vf3, color=colors[4],
+            label='velocity, kalman filter')
     ax.set_xlabel('time [s]')
     ax.set_ylabel('velocity [m/s]')
     ax.axhline(0, color=charcoal_color, linewidth=1, zorder=1)
@@ -50,6 +112,7 @@ def plot_velocity(r, velocity_window_size):
     freq, xf = ff.fft(v, dt) # uses hamming window
     freq, xf1 = ff.fft(vf, dt) # uses hamming window
     freq, xf2 = ff.fft(vf2, dt) # uses hamming window
+    freq, xf3 = ff.fft(vf3, dt) # uses hamming window
 
     ax = axes[1]
     #markerline, stemline, baseline = ax.stem(freq, xf, markerfmt=' ')
@@ -57,6 +120,7 @@ def plot_velocity(r, velocity_window_size):
     ax.plot(freq, xf, color=colors[0], alpha=0.3)
     ax.plot(freq, xf1, color=colors[1])
     ax.plot(freq, xf2, color=colors[3])
+    ax.plot(freq, xf3, color=colors[4])
     ax.set_yscale('log')
     ax.set_xlabel('frequency [Hz]')
     ax.set_ylabel('amplitude')
