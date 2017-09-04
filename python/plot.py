@@ -11,6 +11,7 @@ import seaborn as sns
 
 import filter as ff
 import plot_braking as braking
+import plot_steering as steering
 import util
 
 
@@ -111,12 +112,19 @@ def make_stats(recs, dtype):
     stats = np.array([], dtype)
     for rid, tid, r in recs:
         try:
-            metrics, _, _, _ = braking.get_braking_metrics(r)
+            if dtype == braking.metrics_dtype:
+                metrics, _, _, _ = braking.get_metrics(r)
+            elif dtype == steering.metrics_dtype:
+                #if not (tid == 3 or tid == 4):
+                if not tid == 4:
+                    continue
+                metrics = steering.get_metrics(r)
             # rider id and trial id aren't available within the record datatype
             # so we need to add them here
             metrics['rider id'] = rid
             metrics['trial id'] = tid
-        except TypeError:
+        except (TypeError, AssertionError):
+        #except TypeError:
             continue
         stats = np.hstack((stats, metrics))
     return stats
@@ -124,7 +132,8 @@ def make_stats(recs, dtype):
 
 if __name__ == '__main__':
     from matplotlib.backends.backend_pdf import PdfPages
-    pp = PdfPages('braking_plots.pdf')
+    #pp = PdfPages('braking_plots.pdf')
+    pp = PdfPages('steering_plots.pdf')
 
     def save_fig(fig):
         fig.set_size_inches(12.76, 7.19)
@@ -137,23 +146,51 @@ if __name__ == '__main__':
         cd = pickle.load(f)
 
     recs = load_records()
-    stats = make_stats(recs, braking.braking_metrics_dtype)
 
-    for rid in range(1, 17):
-        fig, axes = braking.plot_rider_braking_events(recs, rid)
-        save_fig(fig)
-        fig, axes = braking.plot_rider_velocities(recs, rid)
-        save_fig(fig)
+    ## braking plots
+    #stats = make_stats(recs, braking.metrics_dtype)
 
-    fig, axes = braking.plot_histograms(stats)
+    #for rid in range(1, 17):
+    #    fig, axes = braking.plot_rider_braking_events(recs, rid)
+    #    save_fig(fig)
+    #    fig, axes = braking.plot_rider_velocities(recs, rid)
+    #    save_fig(fig)
+    #fig, axes = braking.plot_histograms(stats)
+    #save_fig(fig)
+
+    ## steering plots
+    stats = make_stats(recs, steering.metrics_dtype)
+
+    for rid, tid, r in recs:
+        if tid == 3 or tid == 4:
+        #if tid == 4:
+            fig, axes = plot_timeseries(r)
+            fig.suptitle('rider {} trial {}'.format(rid, tid))
+            save_fig(fig)
+
+            k = 10
+            try:
+                fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
+            except AssertionError:
+                print('kth highest frequency is greater than 1.5 Hz '
+                      'for rider {} trial {}'.format(rid, tid))
+                continue
+            ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
+                                                                        tid))
+            save_fig(fig)
+
+            fig, ax = steering.plot_filtered(r)
+            ax.set_title('filtered steer angle for rider {} trial {}'.format(
+                rid, tid))
+            save_fig(fig)
+
+    fig, axes = steering.plot_histograms(stats)
     save_fig(fig)
-
-    grids = braking.plot_bivariates(stats)
+    grids = steering.plot_bivariates(stats)
     for g in grids:
         save_fig(g.fig)
-
-    fig, axes = braking.plot_swarms(stats)
+    fig, axes = steering.plot_swarms(stats)
     save_fig(fig)
 
-    #plt.show()
+    plt.show()
     pp.close()
