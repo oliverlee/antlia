@@ -175,7 +175,7 @@ def get_metrics(rec, window_size=55):
     error = filt_steer - mod_steer
 
     event_groups = get_steer_event_indices(filt_steer)
-    first_turn = False
+    first_turn = True
     for event_range in reversed(event_groups):
         for r0, r1 in event_range:
             sum_error = sum(error[r0:r1])
@@ -183,8 +183,8 @@ def get_metrics(rec, window_size=55):
 
             # if error ratio is too high, discard steering event
             if sum_error/sum_filt < ERROR_RATIO:
-                if not first_turn and len(event_range) > 1:
-                    first_turn = True
+                if first_turn and len(event_range) > 1:
+                    first_turn = False
                     amplitude = np.abs(filt_steer[r0:r1]).max()
                     period = 2*(t[r1] - t[r0])
                     vf = ff.moving_average(rec['speed'],
@@ -207,6 +207,15 @@ def get_metrics(rec, window_size=55):
 
 
 def get_steer_event_indices(filt_steer):
+    """merged_range contains a list of lists of tuples there the list of tuple
+    elements are contiguous.
+
+    example:
+    [
+        [(a, b), (b, c), (c, d)],
+        [(e, f), (f, g), (g, h), (h, i)]
+    ]
+    """
     # identify steering event
     sigma = filt_steer.std()
     steer_event_indices = np.argwhere(np.abs(filt_steer) > sigma)
