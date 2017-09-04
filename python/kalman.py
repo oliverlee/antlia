@@ -3,7 +3,8 @@
 import numpy as np
 
 
-def kalman(Ad, Bd, Cd, Q, R, z, u=None, x0=None, P0=None):
+def kalman(Ad, Bd, Cd, Q, R, z, u=None, x0=None, P0=None,
+           missed_measurement=[]):
     n = z.shape[0]
 
     xhat = np.zeros((n, Ad.shape[0], 1))
@@ -30,6 +31,8 @@ def kalman(Ad, Bd, Cd, Q, R, z, u=None, x0=None, P0=None):
         # measurement update
         # measurement update kalman gain
         S = np.dot(np.dot(Cd, Pminus[i, :]), Cd.T) + R
+        if i in missed_measurement:
+            S += 99*R
         K[i, :] = np.linalg.lstsq(S, np.dot(Cd, Pminus[i, :].T))[0].T
         # measurement update state
         xhat[i, :] = (xhatminus[i, :] +

@@ -13,6 +13,15 @@ import util
 from madgwick_py.madgwickahrs import MadgwickAHRS
 
 
+def running_mean(x, N):
+    return np.convolve(x, np.ones((N,))/N, mode='same')
+
+
+def outlier_index(x, y, N):
+    diff = x - running_mean(x, N)
+    return np.squeeze(np.argwhere(np.abs(diff) > y))
+
+
 def plot_velocity(r, velocity_window_size):
     charcoal_color = sns.xkcd_palette(['charcoal'])[0]
 
@@ -60,17 +69,21 @@ def plot_velocity(r, velocity_window_size):
     ])
     u = np.reshape(a, (-1, 1, 1))
     z = np.reshape(v, (-1, 1, 1))
-    n = z.shape[0]
 
-    xhat, P, K = kalman.kalman(Ad, Bd, Cd, Q, R, z, u)
+    oi = [x for x in outlier_index(v, 2*v.std(), 128) if x > 128]
+    xhat, P, K = kalman.kalman(Ad, Bd, Cd, Q, R, z, u,
+            missed_measurement=oi)
     vf3 = np.squeeze(xhat[:, 1])
 
     colors = sns.color_palette('husl', 6)
     fig, axes = plt.subplots(2, 1)
     axes = axes.ravel()
     ax = axes[0]
-    ax.plot(t, v, color=colors[0], alpha=0.3,
+    ax.plot(t, v, color=colors[0], alpha=0.5,
             label='velocity, measured')
+    ax.plot(t[oi], v[oi], color=colors[0], linestyle=' ', marker='X',
+            markersize=10,
+            label='velocity, measured, outliers')
     ax.plot(t, vf, color=colors[1],
             label='velocity, gaussian weighted moving average, {} samples'.format(
                 velocity_window_size))
@@ -89,9 +102,7 @@ def plot_velocity(r, velocity_window_size):
     freq, xf3 = ff.fft(vf3, dt) # uses hamming window
 
     ax = axes[1]
-    #markerline, stemline, baseline = ax.stem(freq, xf, markerfmt=' ')
-    #plt.setp(stemline, 'color', colors[1], 'alpha', 0.3)
-    ax.plot(freq, xf, color=colors[0], alpha=0.3)
+    ax.plot(freq, xf, color=colors[0], alpha=0.5)
     ax.plot(freq, xf1, color=colors[1])
     ax.plot(freq, xf2, color=colors[3])
     ax.plot(freq, xf3, color=colors[4])
