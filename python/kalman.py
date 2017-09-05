@@ -39,3 +39,35 @@ def kalman(Ad, Bd, Cd, Q, R, z, u=None, x0=None, P0=None,
                       np.dot(K[i, :], (z[i, :] - np.dot(Cd, xhatminus[i, :]))))
         P[i, :] = np.dot(np.eye(Ad.shape[0]) - np.dot(K[i, :], Cd), Pminus[i, :])
     return xhat, P, K
+
+def kalman_velocity(dt, v, u, z, q=5, missed_measurement=[]):
+    Ad = np.array([
+        [1, dt],
+        [0,  1]
+    ])
+    Bd = np.array([
+        [1/2*dt**2],
+        [dt],
+    ])
+    Cd = np.array([
+        [0, 1],
+    ])
+    Q = q * np.array([
+        [1/4*dt**4, 1/2*dt**3],
+        [1/2*dt**3,    dt**2]
+    ])
+    """
+    Find variance at 'constant' speed section
+    In [12]: r['speed'][np.argwhere(
+        r['time'] > 16)[0][0]:np.argwhere(r['time'] > 21)[0][0]].var()
+    Out[12]: 0.64835952938689101
+    """
+    R = np.array([
+        [0.6483595]
+    ])
+    u = np.reshape(u, (-1, 1, 1))
+    z = np.reshape(z, (-1, 1, 1))
+
+    xhat, P, K = kalman(Ad, Bd, Cd, Q, R, z, u,
+                        missed_measurement=missed_measurement)
+    return np.squeeze(xhat[:, 1])

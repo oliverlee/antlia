@@ -19,7 +19,7 @@ def running_mean(x, N):
 
 def outlier_index(x, y, N):
     diff = x - running_mean(x, N)
-    return np.squeeze(np.argwhere(np.abs(diff) > y))
+    return np.reshape(np.argwhere(np.abs(diff) > y), (-1,))
 
 
 def plot_velocity(r, velocity_window_size):
@@ -42,38 +42,11 @@ def plot_velocity(r, velocity_window_size):
     #vf2 = scipy.signal.filtfilt(b, a, v)
     vf2 = scipy.signal.savgol_filter(v, window_length=111, polyorder=5, deriv=0)
 
-    q = 5
-    Ad = np.array([
-        [1, dt],
-        [0,  1]
-    ])
-    Bd = np.array([
-        [1/2*dt**2],
-        [dt],
-    ])
-    Cd = np.array([
-        [0, 1],
-    ])
-    Q = q * np.array([
-        [1/4*dt**4, 1/2*dt**3],
-        [1/2*dt**3,    dt**2]
-    ])
-    """
-    Find variance at 'constant' speed section
-    In [12]: r['speed'][np.argwhere(
-        r['time'] > 16)[0][0]:np.argwhere(r['time'] > 21)[0][0]].var()
-    Out[12]: 0.64835952938689101
-    """
-    R = np.array([
-        [0.6483595]
-    ])
     u = np.reshape(a, (-1, 1, 1))
     z = np.reshape(v, (-1, 1, 1))
+    oi = [x for x in util.outlier_index(v, 2*v.std(), 128) if x > 128]
 
-    oi = [x for x in outlier_index(v, 2*v.std(), 128) if x > 128]
-    xhat, P, K = kalman.kalman(Ad, Bd, Cd, Q, R, z, u,
-            missed_measurement=oi)
-    vf3 = np.squeeze(xhat[:, 1])
+    vf3 = kalman.kalman_velocity(dt, v, u, z, q=5, missed_measurement=oi)
 
     colors = sns.color_palette('husl', 6)
     fig, axes = plt.subplots(2, 1)
@@ -109,14 +82,23 @@ def plot_velocity(r, velocity_window_size):
     ax.set_yscale('log')
     ax.set_xlabel('frequency [Hz]')
     ax.set_ylabel('amplitude')
+    return fig, axes
 
 
-def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
+def get_trajectory(r, yaw_rate_window_size,
                   plot=False, trial_id=None):
     charcoal_color = sns.xkcd_palette(['charcoal'])[0]
-    vf = ff.moving_average(r['speed'],
-                           velocity_window_size,
-                           velocity_window_size/2)
+
+    t = r['time']
+    v = r['speed']
+    a = r['accelerometer x']
+    dt = np.diff(t).mean()
+    u = np.reshape(a, (-1, 1, 1))
+    z = np.reshape(v, (-1, 1, 1))
+    oi = [x for x in util.outlier_index(v, 2*v.std(), 128) if x > 128]
+
+    vf = kalman.kalman_velocity(dt, v, u, z, q=5, missed_measurement=oi)
+
     yf = ff.moving_average(r['gyroscope z'],
                            yaw_rate_window_size,
                            yaw_rate_window_size/2)
@@ -143,16 +125,18 @@ def get_trajectory(r, velocity_window_size, yaw_rate_window_size,
         fig, axes = plt.subplots(2, 1, sharex=True)
         axes = axes.ravel()
 
-        t = r['time']
         for ax, c, sig, sigf, ws, l in zip(axes,
                                [colors[1], colors[7]],
                                [r['speed'], r['gyroscope z']],
                                [vf, yf],
-                               [velocity_window_size, yaw_rate_window_size],
+                               [0, yaw_rate_window_size],
                                [['velocity', '[m/s]'],
                                 ['yaw rate', '[rad/s]']]):
-            label = '{}, gaussian weighted moving average, {} samples'.format(
-                    l[0], ws)
+            if ws > 0:
+                label = '{}, gaussian weighted moving average, {} samples'.format(
+                        l[0], ws)
+            else:
+                label = 'velocity, kalman filter estimate'
             ax.plot(t, sigf, color=c, label=label)
             ylim = ax.get_ylim()
             ax.plot(t, sig, color=c, label=(l[0] + ', measured'), alpha=0.3)
