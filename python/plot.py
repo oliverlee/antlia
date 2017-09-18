@@ -12,6 +12,7 @@ import seaborn as sns
 import filter as ff
 import plot_braking as braking
 import plot_steering as steering
+import path
 import util
 
 
@@ -133,12 +134,13 @@ def make_stats(recs, dtype):
 if __name__ == '__main__':
     from matplotlib.backends.backend_pdf import PdfPages
     #pp = PdfPages('braking_plots.pdf')
-    pp = PdfPages('steering_plots.pdf')
+    #pp = PdfPages('steering_plots.pdf')
+    pp = PdfPages('path_plots.pdf')
 
     def save_fig(fig):
         fig.set_size_inches(12.76, 7.19)
         fig.tight_layout()
-        pp.savefig()
+        pp.savefig(fig)
 
     import record
     import pickle
@@ -159,38 +161,60 @@ if __name__ == '__main__':
     #save_fig(fig)
 
     ## steering plots
-    stats = make_stats(recs, steering.metrics_dtype)
+    #stats = make_stats(recs, steering.metrics_dtype)
 
+    #for rid, tid, r in recs:
+    #    if tid == 3 or tid == 4:
+    #    #if tid == 4:
+    #        fig, axes = plot_timeseries(r)
+    #        fig.suptitle('rider {} trial {}'.format(rid, tid))
+    #        save_fig(fig)
+
+    #        k = 10
+    #        try:
+    #            fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
+    #        except AssertionError:
+    #            print('kth highest frequency is greater than 1.5 Hz '
+    #                  'for rider {} trial {}'.format(rid, tid))
+    #            continue
+    #        ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
+    #                                                                    tid))
+    #        save_fig(fig)
+
+    #        fig, ax = steering.plot_filtered(r)
+    #        ax.set_title('filtered steer angle for rider {} trial {}'.format(
+    #            rid, tid)) #        save_fig(fig)
+
+    #fig, axes = steering.plot_histograms(stats)
+    #save_fig(fig)
+    #grids = steering.plot_bivariates(stats)
+    #for g in grids:
+    #    save_fig(g.fig)
+    #fig, axes = steering.plot_swarms(stats)
+    #save_fig(fig)
+
+    ## trajectory plots
     for rid, tid, r in recs:
         if tid == 3 or tid == 4:
         #if tid == 4:
-            fig, axes = plot_timeseries(r)
-            fig.suptitle('rider {} trial {}'.format(rid, tid))
+            fig, axes = path.plot_velocity(r, 55)
+            fig.suptitle('filtered velocity and fft rider {} trial {}'.format(
+                rid, tid))
             save_fig(fig)
+            #plot_timeseries(r)
 
-            k = 10
-            try:
-                fig, ax, k_freq = steering.plot_fft(r, k, 1.5)
-            except AssertionError:
-                print('kth highest frequency is greater than 1.5 Hz '
-                      'for rider {} trial {}'.format(rid, tid))
-                continue
-            ax.set_title('steer angle fft for rider {} trial {}'.format(rid,
-                                                                        tid))
-            save_fig(fig)
-
-            fig, ax = steering.plot_filtered(r)
-            ax.set_title('filtered steer angle for rider {} trial {}'.format(
+            soln, fig, axes, fig2, ax2 = path.get_trajectory(
+                    r,
+                    yaw_rate_window_size=11,
+                    plot=True,
+                    trial_id=tid)
+            fig.suptitle('filtered signals rider {} trial {}'.format(
                 rid, tid))
             save_fig(fig)
 
-    fig, axes = steering.plot_histograms(stats)
-    save_fig(fig)
-    grids = steering.plot_bivariates(stats)
-    for g in grids:
-        save_fig(g.fig)
-    fig, axes = steering.plot_swarms(stats)
-    save_fig(fig)
+            fig2.suptitle('trajectory rider {} trial {}'.format(rid, tid))
+            save_fig(fig2)
+            print('generated trajectory {} {}'.format(rid, tid))
 
     plt.show()
     pp.close()

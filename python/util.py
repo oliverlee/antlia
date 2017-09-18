@@ -44,3 +44,11 @@ def signal_unit(s):
         raise ValueError('unit for signal {} is not defined'.format(s))
 
 
+def running_mean(x, N):
+    return np.convolve(x, np.ones((N,))/N, mode='same')
+
+
+def outlier_index(x, y, N):
+    diff = x - running_mean(x, N)
+    return np.reshape(np.argwhere(np.abs(diff) > y), (-1,))
+
