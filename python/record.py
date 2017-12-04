@@ -56,7 +56,11 @@ def convert_etrike(record, calibration_dict):
         # Conversion assumes linear relationship incorporates both calibration
         # and unit conversion.
         # 'flag_bool/sync' has no unit conversion
-        if name != 'flag_bool':
+        if name == 'flag_bool':
+            # flip sync value to be active high
+            record[name] = np.invert(record[name].astype(bool)).astype(
+                    record[name].dtype)
+        else:
             record[name] = np.polyval(calibration_dict[newname],
                                       record[name])
         newnames.append(newname)

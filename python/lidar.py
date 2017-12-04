@@ -74,6 +74,8 @@ def get_lidar_records(convert_dtype=True):
                 # convert timestamp to time and start at zero
                 x.time /= 1000
                 x.time -= x.time[0]
+                # flip sync value to be active high
+                x.sync = np.invert(x.sync.astype(bool)).astype(x.sync.dtype)
                 # TODO: convert accelerometer
                 # TODO: convert gps
                 # convert distance from millimeters to meters
