@@ -52,3 +52,45 @@ def outlier_index(x, y, N):
     diff = x - running_mean(x, N)
     return np.reshape(np.argwhere(np.abs(diff) > y), (-1,))
 
+
+def reduce_runs(signal, tol=1e-3):
+    """Return a slice of the signal array with the runs reduced to 2 subsequent
+    elements.
+
+    Parameters:
+    signal: array_like, data to reduce
+    tol: float, tolerance used for element equality
+
+    Returns:
+    reduced_signal: ndarray.view, 'signal' slice with reduced runs
+    reduced_indices: array_like, indices of reduced runs
+
+    Notes: Must be able to compare elements.
+
+    Example:
+    > s = np.array([0, 0, 0, 1, 1, 2, 3, 0, 0])
+    > reduce_signal(s)
+    [0, 0, 1, 2, 3, 0, 0] [0, 2, 3, 4, 5, 6, 7, 8]
+    """
+    signal = np.asarray(signal)
+    edge = np.where(np.abs(np.diff(signal)) > tol)[0] + 1
+
+    # Include first element.
+    index = [0]
+
+    for i in edge:
+        skip = i - index[-1]
+        assert skip > 0
+
+        # If we skip more than one index,
+        # include previous index so edges are preserved.
+        if skip > 1:
+            index.append(i - 1)
+        index.append(i)
+
+    # Include last element if the signal ends in a run.
+    n = len(signal)
+    if index[-1] != n - 1:
+        index.append(n - 1)
+
+    return signal[index], index
