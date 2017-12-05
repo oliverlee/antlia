@@ -10,3 +10,6 @@ data/etrike
 
 # python cache files
 */__pycache__
+
+# uncompressed LIDAR data files
+data/lidar/dumpfile*.bin

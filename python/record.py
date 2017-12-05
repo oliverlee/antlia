@@ -48,13 +48,21 @@ def convert_etrike(record, calibration_dict):
             newname = 'steer angle'
         elif name == 'speed_lsb':
             newname = 'speed'
+        elif name == 'flag_bool':
+            newname = 'sync'
         else:
             raise ValueError(
                 'conversion for signal {} is not defined'.format(name))
-        # conversion assumes linear relationship incorporates both calibration
-        # and unit conversion
-        record[name] = np.polyval(calibration_dict[newname],
-                                  record[name])
+        # Conversion assumes linear relationship incorporates both calibration
+        # and unit conversion.
+        # 'flag_bool/sync' has no unit conversion
+        if name == 'flag_bool':
+            # flip sync value to be active high
+            record[name] = np.invert(record[name].astype(bool)).astype(
+                    record[name].dtype)
+        else:
+            record[name] = np.polyval(calibration_dict[newname],
+                                      record[name])
         newnames.append(newname)
 
     record.dtype.names = newnames
