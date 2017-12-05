@@ -108,6 +108,9 @@ def _get_bicycle_records():
 
 
 class Record(object):
+    kinds = ('lidar', 'bicycle')
+
+
     def __init__(self, lidar_record, bicycle_record):
         self.lidar = lidar_record
         self.bicycle = bicycle_record
@@ -133,8 +136,7 @@ class Record(object):
 
     def plot_timeseries(self, ax=None, **kwargs):
         def plot_two(ax, data, color, label):
-            kinds = ('lidar', 'bicycle')
-            call = lambda f: tuple(map(f, kinds))
+            call = lambda f: tuple(map(f, self.kinds))
 
             if callable(data):
                 data = call(data)
