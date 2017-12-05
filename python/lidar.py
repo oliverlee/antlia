@@ -185,9 +185,13 @@ class Record(object):
         return ax
 
 
-def load_records():
-    return [Record(l, b) for l, b in zip(_get_lidar_records(),
-                                         _get_bicycle_records())]
+def load_records(sync=False):
+    records = [Record(l, b) for l, b in zip(_get_lidar_records(),
+                                            _get_bicycle_records())]
+    if sync:
+        for r in records:
+            r.sync()
+    return records
 
 
 class TimeSignal(object):
