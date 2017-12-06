@@ -11,6 +11,7 @@ import seaborn as sns
 
 from record import load_file
 from util import reduce_runs
+from filter import moving_average
 
 
 LIDAR_NUM_ANGLES = 1521
@@ -110,13 +111,19 @@ def _get_bicycle_records():
 
 class Record(object):
     kinds = ('lidar', 'bicycle')
-
+    VELOCITY_FILTER_WINDOW_SIZE = 55
 
     def __init__(self, lidar_record, bicycle_record):
         self.lidar = lidar_record
         self.bicycle = bicycle_record
         self.synced = None
         self.trials = None
+
+        # filter bicycle speed
+        self.bicycle.speed = moving_average(
+                self.bicycle.speed,
+                self.VELOCITY_FILTER_WINDOW_SIZE,
+                self.VELOCITY_FILTER_WINDOW_SIZE/3)
 
     @staticmethod
     def _nearest_millisecond(x):
