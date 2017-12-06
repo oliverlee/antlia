@@ -119,12 +119,6 @@ class Record(object):
         self.synced = None
         self.trials = None
 
-        # filter bicycle speed
-        self.bicycle.speed = moving_average(
-                self.bicycle.speed,
-                self.VELOCITY_FILTER_WINDOW_SIZE,
-                self.VELOCITY_FILTER_WINDOW_SIZE/3)
-
     @staticmethod
     def _nearest_millisecond(x):
         return np.round(x, 3)
