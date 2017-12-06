@@ -144,9 +144,6 @@ class Record(object):
         return self.synced
 
     def calculate_trials(self):
-        #if self.trials is not None: TODO
-        #    return
-
         if self.trials is None:
             rising_edges = np.where(np.diff(self.bicycle.sync) > 0)[0]
             trials = zip(rising_edges, rising_edges[1:])
@@ -154,10 +151,10 @@ class Record(object):
 
             # filter out trials that are too short
             MINIMUM_TRIAL_DURATION = 30 # seconds
-            trials = [(a, b) for a, b in trials
-                             if (t[b] - t[a]) > MINIMUM_TRIAL_DURATION]
+            self.trials = [self.bicycle[a:b]
+                           for a, b in trials
+                           if (t[b] - t[a]) > MINIMUM_TRIAL_DURATION]
 
-            self.trials = list(trials)
         return self.trials
 
 
@@ -209,28 +206,29 @@ class Record(object):
         ax[1].set_ylabel('button status')
         ax[1].legend()
 
+        idx = slice(0, None)
+        bicycle = self.bicycle
         t = self.bicycle['time']
-        idx = slice(0, -1)
         xlim = None
         if timerange is not None:
             idx = (t >= timerange[0]) & (t < timerange[1])
+            t = t[idx]
             xlim = timerange
         elif trial is not None:
             assert(self.trials is not None)
-            i0, i1 = self.trials[trial]
-            idx = slice(i0, i1)
-            xlim = t[i0], t[i1]
-        t = t[idx]
+            bicycle = self.trials[trial]
+            t = bicycle.time
+            xlim = t[0], t[-1]
 
         next(colors_iter)
-        y = self.bicycle['steer angle'][idx]
+        y = bicycle['steer angle'][idx]
         ax[2].plot(t, y, color=next(colors_iter), label='resampled steer angle')
         ax[2].set_xlabel('time [s]')
         ax[2].set_ylabel('steer angle [rad]')
         ax[2].legend()
 
         next(colors_iter)
-        y = self.bicycle['speed'][idx]
+        y = bicycle['speed'][idx]
         ax[3].plot(t, y, color=next(colors_iter), label='resampled speed')
         ax[3].set_xlabel('time [s]')
         ax[3].set_ylabel('speed [m/s]')
