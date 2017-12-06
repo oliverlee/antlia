@@ -4,6 +4,7 @@ import os
 import pickle
 import numpy as np
 import numpy.testing as npt
+import scipy.signal
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -115,6 +116,7 @@ class Record(object):
         self.lidar = lidar_record
         self.bicycle = bicycle_record
         self.synced = None
+        self.trials = None
 
     @staticmethod
     def _nearest_millisecond(x):
@@ -134,7 +136,25 @@ class Record(object):
             self.synced = sync_offset
         return self.synced
 
-    def plot_timeseries(self, ax=None, **kwargs):
+    def calculate_trials(self):
+        #if self.trials is not None: TODO
+        #    return
+
+        if self.trials is None:
+            rising_edges = np.where(np.diff(self.bicycle.sync) > 0)[0]
+            trials = zip(rising_edges, rising_edges[1:])
+            t = self.bicycle.time
+
+            # filter out trials that are too short
+            MINIMUM_TRIAL_DURATION = 30 # seconds
+            trials = [(a, b) for a, b in trials
+                             if (t[b] - t[a]) > MINIMUM_TRIAL_DURATION]
+
+            self.trials = list(trials)
+        return self.trials
+
+
+    def plot_timeseries(self, trial=None, timerange=None, ax=None, **kwargs):
         def plot_two(ax, data, color, label):
             call = lambda f: tuple(map(f, self.kinds))
 
@@ -149,7 +169,7 @@ class Record(object):
             return [ax.plot(*d, color=c, label=l) for d, c, l in args]
 
         if ax is None:
-            _, ax = plt.subplots(2, 1, sharex=True, **kwargs)
+            _, ax = plt.subplots(4, 1, sharex=True, **kwargs)
 
         colors = sns.color_palette('Paired', 10)
         colors_iter = iter(colors)
@@ -182,15 +202,46 @@ class Record(object):
         ax[1].set_ylabel('button status')
         ax[1].legend()
 
+        t = self.bicycle['time']
+        idx = slice(0, -1)
+        xlim = None
+        if timerange is not None:
+            idx = (t >= timerange[0]) & (t < timerange[1])
+            xlim = timerange
+        elif trial is not None:
+            assert(self.trials is not None)
+            i0, i1 = self.trials[trial]
+            idx = slice(i0, i1)
+            xlim = t[i0], t[i1]
+        t = t[idx]
+
+        next(colors_iter)
+        y = self.bicycle['steer angle'][idx]
+        ax[2].plot(t, y, color=next(colors_iter), label='resampled steer angle')
+        ax[2].set_xlabel('time [s]')
+        ax[2].set_ylabel('steer angle [rad]')
+        ax[2].legend()
+
+        next(colors_iter)
+        y = self.bicycle['speed'][idx]
+        ax[3].plot(t, y, color=next(colors_iter), label='resampled speed')
+        ax[3].set_xlabel('time [s]')
+        ax[3].set_ylabel('speed [m/s]')
+        ax[3].legend()
+
+        if xlim is not None:
+            ax[0].set_xlim(xlim)
         return ax
 
 
-def load_records(sync=False):
+def load_records(sync=False, calculate_trials=True):
     records = [Record(l, b) for l, b in zip(_get_lidar_records(),
                                             _get_bicycle_records())]
-    if sync:
-        for r in records:
+    for r in records:
+        if sync:
             r.sync()
+        if calculate_trials:
+            r.calculate_trials()
     return records
 
 
