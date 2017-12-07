@@ -35,7 +35,7 @@ def fft(x, sample_period, window_type=None):
     # only use first half of fft since real signals are mirrored about nyquist
     # frequency
     xf = 2/n * np.abs(scipy.fftpack.fft(windowed_x)[:n//2])
-    freq = np.linspace(0, 1/(2*sample_period), n/2)
+    freq = np.linspace(0, 1/(2*sample_period), n//2)
     return freq, xf
 
 
