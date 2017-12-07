@@ -477,7 +477,7 @@ class SampledTimeSignal(TimeSignal):
         sync_success_limit = 0.9 * self.signal.sum();
         index = c.argmax()
         if c[index] < sync_success_limit:
-            PREPEND_TIME = 1*60/self.period # 1 minute(s)
+            PREPEND_TIME = 10/self.period # 10 second(s)
 
             start = self.time[0] - self.period
             stop = start - PREPEND_TIME
