@@ -156,6 +156,13 @@ class Record(object):
 
         return self._trial
 
+    def trials(self, trial_range=4):
+        valid = lambda i: self._trial_range_index[i][4] is not None
+        return (self.trial(i, trial_range)
+                if valid(i) else None
+                for i in range(len(self._trial)))
+
+
     def trial(self, trial_number, trial_range=4):
         if self._trial is None:
             self.calculate_trials()
