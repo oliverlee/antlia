@@ -13,3 +13,6 @@ data/etrike
 
 # uncompressed LIDAR data files
 data/lidar/dumpfile*.bin
+
+# jupyter notebook checkpoints
+*.ipynb_checkpoints/
