@@ -250,7 +250,7 @@ class Record(object):
                 r3_maxima,
                 r4)
 
-    def plot_timeseries(self, trial=None, timerange=None, ax=None, **kwargs):
+    def plot_timing(self, trial=None, timerange=None, ax=None, **kwargs):
         def plot_two(ax, data, color, label):
             call = lambda f: tuple(map(f, self.kinds))
 
@@ -265,7 +265,7 @@ class Record(object):
             return [ax.plot(*d, color=c, label=l) for d, c, l in args]
 
         if ax is None:
-            _, ax = plt.subplots(4, 1, sharex=True, **kwargs)
+            _, ax = plt.subplots(2, 1, sharex=True, **kwargs)
 
         colors = sns.color_palette('Paired', 10)
         colors_iter = iter(colors)
@@ -297,37 +297,6 @@ class Record(object):
         ax[1].set_xlabel('time [s]')
         ax[1].set_ylabel('button status')
         ax[1].legend()
-
-        idx = slice(0, None)
-        bicycle = self.bicycle
-        t = self.bicycle['time']
-        xlim = None
-        if timerange is not None:
-            idx = (t >= timerange[0]) & (t < timerange[1])
-            t = t[idx]
-            xlim = timerange
-        elif trial is not None:
-            assert(self._trial is not None)
-            bicycle = self._trial[trial]
-            t = bicycle.time
-            xlim = t[0], t[-1]
-
-        next(colors_iter)
-        y = bicycle['steer angle'][idx]
-        ax[2].plot(t, y, color=next(colors_iter), label='resampled steer angle')
-        ax[2].set_xlabel('time [s]')
-        ax[2].set_ylabel('steer angle [rad]')
-        ax[2].legend()
-
-        next(colors_iter)
-        y = bicycle['speed'][idx]
-        ax[3].plot(t, y, color=next(colors_iter), label='resampled speed')
-        ax[3].set_xlabel('time [s]')
-        ax[3].set_ylabel('speed [m/s]')
-        ax[3].legend()
-
-        if xlim is not None:
-            ax[0].set_xlim(xlim)
         return ax
 
     def plot_trial_range_calculation(self, trialnum, ax=None, **kwargs):
