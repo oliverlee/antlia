@@ -330,6 +330,51 @@ class Record(object):
             ax[0].set_xlim(xlim)
         return ax
 
+    def plot_trial_range_calculation(self, trialnum, ax=None, **kwargs):
+        if ax is None:
+            _, ax = plt.subplots(**kwargs)
+
+        colors = sns.color_palette('Paired', 10)
+
+        ran = self._trial_range_index[trialnum]
+        trial = self._trial[trialnum]
+        v = self._cheby1_low_pass_filter(trial.speed)
+
+        ax.plot(trial.time, trial.speed, label='speed',
+                alpha=0.5, color=colors[0], zorder=0)
+        ax.plot(trial.time, v, label='speed, cheby1 low pass',
+                linewidth=3, color=colors[2], zorder=1)
+        try:
+            # use trial() method to get data sliced to valid range
+            valid_trial = self.trial(trialnum)
+            ax.plot(valid_trial.time, valid_trial.speed,
+                    label='speed (valid range)',
+                    color=colors[1], zorder=0)
+        except TypeError:
+            pass
+
+        mt = 'X' # markertype
+        ms = 10 # markersize
+        ax.plot(trial.time[ran[0]], v[ran[0]], mt, label='range 0 extrema',
+                markersize=ms, color=colors[3])
+        if ran[1] is not None:
+            ax.plot(trial.time[ran[1]], v[ran[1]], mt, label='range 1 maxima',
+                    markersize=ms, color=colors[7])
+        if ran[2] is not None:
+            ax.plot(trial.time[ran[2]], v[ran[2]], mt, label='range 2 minima',
+                    markersize=ms, color=colors[5])
+        if ran[4] is not None:
+            ax.plot(trial.time[ran[4]], v[ran[4]], mt, label='range 4 minima',
+                    markersize=ms, color=colors[9])
+            ax.axvspan(trial.time[ran[4]][0], trial.time[ran[4]][-1],
+                       label='range 4',
+                       alpha=0.5, color=colors[8])
+
+        ax.set_xlabel('time [s]')
+        ax.set_ylabel('speed [m/s]')
+        ax.legend()
+        return ax
+
 
 def load_records(sync=False, calculate_trials=True):
     records = [Record(l, b) for l, b in zip(_get_lidar_records(),
