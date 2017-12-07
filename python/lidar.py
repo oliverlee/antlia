@@ -111,13 +111,13 @@ def _get_bicycle_records():
 
 class Record(object):
     kinds = ('lidar', 'bicycle')
-    VELOCITY_FILTER_WINDOW_SIZE = 55
 
     def __init__(self, lidar_record, bicycle_record):
         self.lidar = lidar_record
         self.bicycle = bicycle_record
         self.synced = None
-        self.trials = None
+        self._trial = None
+        self._trial_range_index = None
 
     @staticmethod
     def _nearest_millisecond(x):
@@ -138,19 +138,117 @@ class Record(object):
         return self.synced
 
     def calculate_trials(self):
-        if self.trials is None:
+        if self._trial is None:
             rising_edges = np.where(np.diff(self.bicycle.sync) > 0)[0]
             trials = zip(rising_edges, rising_edges[1:])
             t = self.bicycle.time
 
             # filter out trials that are too short
             MINIMUM_TRIAL_DURATION = 30 # seconds
-            self.trials = [self.bicycle[a:b]
+            self._trial = [self.bicycle[a:b]
                            for a, b in trials
                            if (t[b] - t[a]) > MINIMUM_TRIAL_DURATION]
 
-        return self.trials
+            trial_range_index = []
+            for i in range(len(self._trial)):
+                trial_range_index.append(self._calculate_trial_ranges(i))
+            self._trial_range_index = trial_range_index
 
+        return self._trial
+
+    def trial(self, trial_number, trial_range=4):
+        if self._trial is None:
+            self.calculate_trials()
+
+        extrema = self._trial_range_index[trial_number][trial_range]
+        index = slice(*extrema[np.array([0, -1])])
+        return self._trial[trial_number][index]
+
+    def _cheby1_low_pass_filter(self, x):
+        dt = np.diff(self.bicycle.time)
+        period = self._nearest_millisecond(dt.mean())
+        fs = 1/period # bicycle sample rate
+        order = 5
+        apass = 0.001 # dB
+        fcut = 0.08 # Hz, cutoff frequency
+
+        wn = fcut / (0.5*fs)
+        b, a = scipy.signal.cheby1(order, apass, wn)
+        return scipy.signal.filtfilt(b, a, x)
+
+    def _calculate_trial_ranges(self, trialnum):
+        """In a trial, we normally observe 3 phases. We describe each phase as:
+        1. Subject moves from the LIDAR/obstacle to path start
+        2. Subject moves from path start to path end
+        3. Subject moves from path end to the LIDAR/obstacle
+
+        Each phase corresponds to a bump in the speed signal. Phase 2 is
+        extracted by the following method:
+        1. Apply a low-pass filter to the speed signal.
+        2. Calculate local extrema of speed signal for the entire trial.
+           This is denoted as RANGE0.
+        3. Pick local maxima from RANGE0 that exceed the threshold RANGE1_LIMIT.
+           The time spanned by these local maxima denote RANGE1.
+        4. Pick local minima within RANGE1 and less than
+           RANGE2_PERCENT*min(maxima_RANGE1) and RANGE2_LIMIT. The time
+           spanned by these local minima denote RANGE2.
+        5. Pick local maxima within RANGE2. The time spanned by these local
+           maxima denote RANGE3.
+        6. Find the local minima of RANGE2 closest in time before and after
+           RANGE3.
+        """
+        RANGE1_LIMIT = 1 # [kph]
+        RANGE2_LIMIT = 4 # [kph]
+        RANGE2_PERCENT = 0.9 # [percent]
+
+        # filtered speed, range0 extrema
+        v = self._cheby1_low_pass_filter(self._trial[trialnum].speed)
+        r0_minima = scipy.signal.argrelextrema(v, np.less)[0]
+        r0_maxima = scipy.signal.argrelextrema(v, np.greater)[0]
+        r0 = np.concatenate((r0_minima, r0_maxima))
+
+        r1_maxima = np.array([i for i in r0_maxima if v[i] > RANGE1_LIMIT])
+        if len(r1_maxima) < 1:
+            print('Unable to determine range 1')
+            return (r0, None, None, None, None)
+
+        a = min(RANGE2_PERCENT * v[r1_maxima].min(), RANGE2_LIMIT)
+        r2_minima = np.array([i for i in r0_minima
+                              if ((i > r1_maxima[0]) and
+                                  (i < r1_maxima[-1]) and
+                                  (v[i] < a))])
+        if len(r2_minima) < 1:
+            print('Unable to determine range 2')
+            return (r0,
+                    r1_maxima,
+                    None,
+                    None,
+                    None)
+
+        ia = r1_maxima > r2_minima[0]
+        ib = r1_maxima < r2_minima[-1]
+        r3_maxima = r1_maxima[ia & ib]
+
+        b = None
+        c = None
+        for i in r2_minima:
+            if i < r3_maxima[0]:
+                b = i
+            if i > r3_maxima[-1]:
+                c = i
+                break
+        # Special case to fix range 4 for rider 3, trial 0.
+        for i in r2_minima:
+            if i > b and i < c:
+                b = i
+                break;
+        r4 = np.array([b, c])
+
+        return (r0,
+                r1_maxima,
+                r2_minima,
+                r3_maxima,
+                r4)
 
     def plot_timeseries(self, trial=None, timerange=None, ax=None, **kwargs):
         def plot_two(ax, data, color, label):
@@ -209,8 +307,8 @@ class Record(object):
             t = t[idx]
             xlim = timerange
         elif trial is not None:
-            assert(self.trials is not None)
-            bicycle = self.trials[trial]
+            assert(self._trial is not None)
+            bicycle = self._trial[trial]
             t = bicycle.time
             xlim = t[0], t[-1]
 
