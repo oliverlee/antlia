@@ -9,9 +9,9 @@ import scipy.signal
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from record import load_file
-from util import reduce_runs
-from filter import moving_average
+from antlia.record import load_file
+from antlia.util import reduce_runs
+from antlia.filter import moving_average
 
 
 LIDAR_NUM_ANGLES = 1521
@@ -48,17 +48,17 @@ LIDAR_CONVERTED_DTYPE = np.dtype([
     ('distance', 'f8', (LIDAR_NUM_ANGLES,)),
 ])
 
-__record_path = os.path.join(os.path.dirname(__file__),
-                             r'../data/lidar/')
 
 def __get_record_files(extension):
     record_path = os.path.join(os.path.dirname(__file__),
-                               r'../data/lidar/')
+                               r'../../data/lidar/')
     return sorted(glob.glob('{}*{}'.format(record_path, extension)))
 
 
 LIDAR_RECORD_FILES =  __get_record_files('.bin')
 BICYCLE_RECORD_FILES = __get_record_files('.csv')
+assert LIDAR_RECORD_FILES, "No LIDAR records found!"
+assert BICYCLE_RECORD_FILES, "No bicycle records found!"
 
 
 def _get_lidar_records(convert_dtype=True):
@@ -98,7 +98,7 @@ def _get_lidar_records(convert_dtype=True):
 def _get_bicycle_records():
     # load calibration data
     calibration_path = os.path.join(os.path.dirname(__file__),
-                                    r'config.p')
+                                    '..', r'config.p')
     with open(calibration_path, 'rb') as f:
         calibration = pickle.load(f)
 

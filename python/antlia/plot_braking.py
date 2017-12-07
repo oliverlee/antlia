@@ -6,8 +6,8 @@ import matplotlib.lines
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import filter as ff
-import util
+from antlia import filter as ff
+from antlia import util
 
 metrics_dtype = np.dtype([
     ('linregress slope', '<f8'),

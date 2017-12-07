@@ -7,10 +7,10 @@ import matplotlib.patches
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import filter as ff
-import kalman
-import util
-from madgwick_py.madgwickahrs import MadgwickAHRS
+from antlia import filter as ff
+from antlia import kalman
+from antlia import util
+from antlia.madgwick_py.madgwickahrs import MadgwickAHRS
 
 
 def running_mean(x, N):
