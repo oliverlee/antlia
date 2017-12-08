@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 
-import filter as ff
-import plot_braking as braking
-import plot_steering as steering
-import path
-import util
+from antlia import filter as ff
+from antlia import path
+from antlia import util
+from antlia import plot_braking as braking
+from antlia import plot_steering as steering
 
 
 def plot_timeseries(rec):
@@ -142,7 +142,7 @@ if __name__ == '__main__':
         fig.tight_layout()
         pp.savefig(fig)
 
-    import record
+    from antlia import record
     import pickle
     with open('config.p', 'rb') as f:
         cd = pickle.load(f)
