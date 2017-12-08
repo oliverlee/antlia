@@ -119,14 +119,16 @@ class Record(object):
         self._trial = None
         self._trial_range_index = None
 
+        dt = np.diff(self.bicycle.time)
+        self.bicycle_period = self._nearest_millisecond(dt.mean())
+
     @staticmethod
     def _nearest_millisecond(x):
         return np.round(x, 3)
 
     def sync(self):
         if self.synced is None:
-            dt = np.diff(self.bicycle.time)
-            period = self._nearest_millisecond(dt.mean())
+            period = self.bicycle_period
             a = SampledTimeSignal.from_record(self, 'lidar', 'sync', period)
             b = SampledTimeSignal.from_record(self, 'bicycle', 'sync', period)
 
@@ -163,23 +165,78 @@ class Record(object):
                 for i in range(len(self._trial)))
 
 
-    def trial(self, trial_number, trial_range=4):
+    def trial(self, trial_number, trial_range=5):
         if self._trial is None:
             self.calculate_trials()
 
-        extrema = self._trial_range_index[trial_number][trial_range]
-        index = slice(*extrema[np.array([0, -1])])
-        return self._trial[trial_number][index]
+        if trial_range < 5:
+            extrema = self._trial_range_index[trial_number][trial_range]
+            index = slice(*extrema[np.array([0, -1])])
+            return self._trial[trial_number][index]
+        elif trial_range == 5:
+            try:
+                return self._active_trial_range(trial_number)
+            except TypeError:
+                # missing/problematic velocity signal for rider 0 trial {0, 1}
+                # use manually calculated values
 
-    def _cheby1_low_pass_filter(self, x):
-        dt = np.diff(self.bicycle.time)
-        period = self._nearest_millisecond(dt.mean())
+                # assume this error only occurs for rider 0
+                trial = self._trial[trial_number]
+                if trial_number == 0:
+                    index = (trial.time > 80) & (trial.time < 95)
+                elif trial_number == 1:
+                    index = (trial.time > 200) & (trial.time < 280)
+                return trial[index]
+
+        raise ValueError(
+            'Invalid value for \'trial_range\', {}'.format(trial_range))
+
+    def _active_trial_range(self, trial_number):
+        """Extract the range of a trial where the participant is active. This
+        removes the parts of the start and end of a trial and may not capture
+        initial acceleration nor final deceleration.
+        """
+        MIN_SPEED = 2.8 # m/s
+
+        assert self._trial is not None
+        trial = self.trial(trial_number, 4)
+
+        # filter speed
+        v = self._cheby1_low_pass_filter(trial.speed, 0.5)
+
+        edges = np.diff((v > MIN_SPEED).astype(int))
+        edge_index = np.where(edges)[0]
+        edge_type = edges[edge_index] # rising (1) or falling (-1)
+
+        n = len(edge_type)
+        assert n > 0 # verify the signal exceeds MIN_SPEED
+
+        # go through observed cases
+        if n == 1 and edge_type[0] == -1:
+            # single falling edge in the second half of trial
+            # set rising edge to the first sample
+            assert edge_index[0] > n/2
+            index = np.insert(edge_index, 0, 0)
+        elif n == 2 and edge_type[0] == 1 and edge_type[1] == -1:
+            # normal case with single rising edge and single falling edge
+            index = edge_index
+        elif n == 3 and edge_type[0] == -1 and edge_index[0] < 100:
+            # extra falling edge at the start of the trial
+            assert edge_type[1] == 1
+            assert edge_type[2] == -1
+            index = edge_index[1:]
+        else:
+            # some other non-handled case occurs
+            raise NotImplementedError
+        return trial[slice(index[0], index[1])]
+
+    def _cheby1_low_pass_filter(self, x, fc):
+        period = self.bicycle_period
         fs = 1/period # bicycle sample rate
         order = 5
         apass = 0.001 # dB
-        fcut = 0.08 # Hz, cutoff frequency
 
-        wn = fcut / (0.5*fs)
+        wn = fc / (0.5*fs)
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
 
@@ -209,7 +266,7 @@ class Record(object):
         RANGE2_PERCENT = 0.9 # [percent]
 
         # filtered speed, range0 extrema
-        v = self._cheby1_low_pass_filter(self._trial[trialnum].speed)
+        v = self._cheby1_low_pass_filter(self._trial[trialnum].speed, 0.08)
         r0_minima = scipy.signal.argrelextrema(v, np.less)[0]
         r0_maxima = scipy.signal.argrelextrema(v, np.greater)[0]
         r0 = np.concatenate((r0_minima, r0_maxima))
