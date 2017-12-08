@@ -11,7 +11,7 @@ import seaborn as sns
 
 from antlia.record import load_file
 from antlia.util import reduce_runs
-from antlia.filter import moving_average
+from antlia.filter import moving_average, fft
 
 
 LIDAR_NUM_ANGLES = 1521
@@ -202,7 +202,7 @@ class Record(object):
         trial = self.trial(trial_number, 4)
 
         # filter speed
-        v = self._cheby1_low_pass_filter(trial.speed, 0.5)
+        v = self._cheby1_lowpass_filter(trial.speed, 0.5)
 
         edges = np.diff((v > MIN_SPEED).astype(int))
         edge_index = np.where(edges)[0]
@@ -230,7 +230,7 @@ class Record(object):
             raise NotImplementedError
         return trial[slice(index[0], index[1])]
 
-    def _cheby1_low_pass_filter(self, x, fc):
+    def _cheby1_lowpass_filter(self, x, fc):
         period = self.bicycle_period
         fs = 1/period # bicycle sample rate
         order = 5
@@ -240,7 +240,7 @@ class Record(object):
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
 
-    def _calculate_trial_ranges(self, trialnum):
+    def _calculate_trial_ranges(self, trial_number):
         """In a trial, we normally observe 3 phases. We describe each phase as:
         1. Subject moves from the LIDAR/obstacle to path start
         2. Subject moves from path start to path end
@@ -266,7 +266,7 @@ class Record(object):
         RANGE2_PERCENT = 0.9 # [percent]
 
         # filtered speed, range0 extrema
-        v = self._cheby1_low_pass_filter(self._trial[trialnum].speed, 0.08)
+        v = self._cheby1_lowpass_filter(self._trial[trial_number].speed, 0.08)
         r0_minima = scipy.signal.argrelextrema(v, np.less)[0]
         r0_maxima = scipy.signal.argrelextrema(v, np.greater)[0]
         r0 = np.concatenate((r0_minima, r0_maxima))
@@ -314,7 +314,156 @@ class Record(object):
                 r3_maxima,
                 r4)
 
-    def plot_timing(self, trial=None, timerange=None, ax=None, **kwargs):
+    def _chebwin_fft(self, x, attenuation=300, max_freq=None):
+        """Calculate the FFT of x with a chebwin window.
+
+        Parameters:
+        x: array_like, signal
+        attenuation: float, attenuation of Dolph-Chebyshev window in dB
+        max_freq: float, upper limit for returned frequency vector
+
+        Returns:
+        freq: array_like, frequencies
+        xf: array_like, frequency component of signal 'x'
+        """
+        window = lambda x: scipy.signal.chebwin(x, at=attenuation, sym=False)
+        freq, xf = fft(x, self.bicycle_period, window)
+        if max_freq is not None:
+            index = freq < max_freq
+        else:
+            index = slice(0, None)
+        return freq[index], xf[index]
+
+    def steer_angle_cutoff(self, trial, intermediate_values=False):
+        freq, xf = self._chebwin_fft(trial['steer angle'], max_freq=2)
+
+        # find local minima in FFT
+        minima = scipy.signal.argrelextrema(xf, np.less)[0]
+        m0 = minima[0]
+        m1 = minima[1]
+        m2 = minima[2]
+
+        # default cutoff frequency
+        cutoff = freq[m1]
+
+        # Handle special cases. The cutoff frequency should maximize frequency
+        # components corresponding with maneuvering and minimize frequency
+        # components corresponding with pedalling. This appears to be the first
+        # bump in the FFT of the steer angle.
+        if freq[m0] > 0.5:
+            # FFT window main lobe too large and first minimum not detected
+            cutoff = freq[m0]
+        elif freq[m1] < 0.5 and xf[m1] > xf[m0]:
+            # leakage from nearby frequencies results in an invalid minimum
+            for m in minima[2:]:
+                if xf[m] < xf[m0]:
+                    cutoff = freq[m]
+                    break
+        elif freq[m1] > 1 and (freq[m1] - freq[m0]) > 1:
+            # minimum between m0 and m1 not detected
+            cutoff = 0.5*(0.5 + freq[m1])
+        elif np.abs(xf[m1] - xf[m0]) < 0.2*xf[m2] and freq[m0] < 0.5:
+            # m1 too close to m0, frequencies between the two are attenuated
+            # when steer angle is filtered
+            cutoff = 0.5*(freq[m1] + freq[m2])
+
+        if intermediate_values:
+            return cutoff, (freq, xf), minima
+        return cutoff
+
+    def _butter_bandpass_filter(self, x, fc):
+        fs = 1/self.bicycle_period
+        order = 3
+        wn = np.array([0.1, fc]) / (0.5*fs)
+        b, a = scipy.signal.butter(order, wn, btype='bandpass')
+        return scipy.signal.filtfilt(b, a, x)
+
+    def filtered_steer_angle(self, trial, fc=None):
+        if fc is None:
+            fc = self.steer_angle_cutoff(trial)
+
+        return self._butter_bandpass_filter(trial['steer angle'], fc)
+
+    def plot_steer_angle_filter_calculation(self, trial_number,
+                                            ax=None, **kwargs):
+        if ax is None:
+            _, ax = plt.subplots(2, 1, **kwargs)
+
+        colors = sns.color_palette('Paired', 10)
+
+        trial = self.trial(trial_number)
+        cutoff, (freq, xf), minima = self.steer_angle_cutoff(trial, True)
+        m0 = minima[0]
+        m1 = minima[1]
+        m2 = minima[2]
+
+        t = trial.time
+        x = trial['steer angle']
+        z_06 = self._butter_bandpass_filter(x, 0.6)
+        z_m1 = self._butter_bandpass_filter(x, freq[m1])
+        z_m2 = self._butter_bandpass_filter(x, freq[m2])
+        z_c = self._butter_bandpass_filter(x, cutoff)
+
+        # plot filtered versions of steer angle signal
+        ax[0].plot(t, z_06,
+                   label='steer angle (fc = 0.6 Hz)',
+                   color=colors[1], alpha=0.6)
+        ax[0].plot(t, z_m1,
+                   label='steer angle (fc = {:0.02f} Hz), m1'.format(freq[m1]),
+                   color=colors[5], alpha=0.6)
+        ax[0].plot(t, z_m2,
+                   label='steer angle (fc = {:0.02f} Hz), m2'.format(freq[m2]),
+                   color=colors[7], alpha=0.6)
+        ax[0].plot(t, z_c, '--',
+                   label='steer angle (fc = {:0.02f} Hz), c'.format(cutoff),
+                   color=colors[9])
+        ax[0].plot(t, x,
+                   label='steer angle (unfiltered)',
+                   color=colors[3])
+        ax[0].set_xlabel('time [s]')
+        ax[0].set_ylabel('speed [m/s]')
+        ax[0].legend()
+
+        # plot FFTs
+        max_freq = 5 # Hz
+        ax[1].plot(*self._chebwin_fft(z_06, max_freq=max_freq),
+                   label='steer angle (fc = 0.6 Hz)',
+                   color=colors[1], alpha=0.6)
+        ax[1].plot(*self._chebwin_fft(z_m1, max_freq=max_freq),
+                   label='steer angle (fc = {:0.02f} Hz), m1'.format(freq[m1]),
+                   color=colors[5], alpha=0.6)
+        ax[1].plot(*self._chebwin_fft(z_m2, max_freq=max_freq),
+                   label='steer angle (fc = {:0.02f} Hz), m2'.format(freq[m2]),
+                   color=colors[7], alpha=0.6)
+        ax[1].plot(*self._chebwin_fft(z_c, max_freq=max_freq), '--',
+                   label='steer angle (fc = {:0.02f} Hz), c'.format(cutoff),
+                   color=colors[9])
+
+        # plot this FFT last and use saved ylim as this dominates due to
+        # the DC  component
+        ylim = ax[1].get_ylim()
+        ax[1].plot(*self._chebwin_fft(x, max_freq=max_freq),
+                   label='steer angle (unfiltered)',
+                   color=colors[3])
+        ax[1].set_ylim(ylim)
+
+        # plot minima markers
+        ax[1].plot(freq[minima][:10], xf[minima][:10],
+                   'X', markersize=10,
+                   color=colors[3], alpha=0.6)
+        ax[1].plot(freq[m1], xf[m1],
+                   'o', markersize=12,
+                   color=colors[5], alpha=0.6)
+        ax[1].plot(freq[m2], xf[m2],
+                   'o', markersize=12,
+                   color=colors[7], alpha=0.6)
+
+        ax[1].set_title('steer angle FFT')
+        ax[1].set_xlabel('frequency [Hz]')
+        ax[1].legend()
+        return ax
+
+    def plot_timing(self, ax=None, **kwargs):
         def plot_two(ax, data, color, label):
             call = lambda f: tuple(map(f, self.kinds))
 
@@ -363,15 +512,15 @@ class Record(object):
         ax[1].legend()
         return ax
 
-    def plot_trial_range_calculation(self, trialnum, ax=None, **kwargs):
+    def plot_trial_range_calculation(self, trial_number, ax=None, **kwargs):
         if ax is None:
             _, ax = plt.subplots(**kwargs)
 
         colors = sns.color_palette('Paired', 10)
 
-        ran = self._trial_range_index[trialnum]
-        trial = self._trial[trialnum]
-        v = self._cheby1_low_pass_filter(trial.speed)
+        ran = self._trial_range_index[trial_number]
+        trial = self._trial[trial_number]
+        v = self._cheby1_lowpass_filter(trial.speed)
 
         ax.plot(trial.time, trial.speed, label='speed',
                 alpha=0.5, color=colors[0], zorder=0)
@@ -379,7 +528,7 @@ class Record(object):
                 linewidth=3, color=colors[2], zorder=1)
         try:
             # use trial() method to get data sliced to valid range
-            valid_trial = self.trial(trialnum)
+            valid_trial = self.trial(trial_number)
             ax.plot(valid_trial.time, valid_trial.speed,
                     label='speed (valid range)',
                     color=colors[1], zorder=0)
