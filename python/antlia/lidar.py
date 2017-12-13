@@ -365,7 +365,7 @@ class Record(object):
         elif np.abs(xf[m1] - xf[m0]) < 0.2*xf[m2] and freq[m0] < 0.5:
             # m1 too close to m0, frequencies between the two are attenuated
             # when steer angle is filtered
-            cutoff = 0.5*(freq[m1] + freq[m2])
+            cutoff = 0.33*(freq[m1] + freq[m2])
 
         if intermediate_values:
             return cutoff, (freq, xf), minima
