@@ -352,7 +352,7 @@ class Record(object):
         # bump in the FFT of the steer angle.
         if freq[m0] > 0.5:
             # FFT window main lobe too large and first minimum not detected
-            cutoff = freq[m0]
+            cutoff = 0.6
         elif freq[m1] < 0.5 and xf[m1] > xf[m0]:
             # leakage from nearby frequencies results in an invalid minimum
             for m in minima[2:]:
