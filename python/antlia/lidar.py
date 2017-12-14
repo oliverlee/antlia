@@ -11,7 +11,7 @@ import seaborn as sns
 
 from antlia.record import load_file
 from antlia.util import reduce_runs
-from antlia.filter import moving_average, fft
+from antlia.trial import Trial
 
 
 LIDAR_NUM_ANGLES = 1521
@@ -118,13 +118,10 @@ class Record(object):
         self.synced = None
         self._trial = None
         self._trial_range_index = None
+        self.trial = None
 
         dt = np.diff(self.bicycle.time)
         self.bicycle_period = self._nearest_millisecond(dt.mean())
-
-    @staticmethod
-    def _nearest_millisecond(x):
-        return np.round(x, 3)
 
     def sync(self):
         if self.synced is None:
@@ -139,100 +136,12 @@ class Record(object):
             self.synced = sync_offset
         return self.synced
 
-    def calculate_trials(self):
-        if self._trial is None:
-            rising_edges = np.where(np.diff(self.bicycle.sync) > 0)[0]
-            trials = zip(rising_edges, rising_edges[1:])
-            t = self.bicycle.time
+    @staticmethod
+    def _nearest_millisecond(x):
+        return np.round(x, 3)
 
-            # filter out trials that are too short
-            MINIMUM_TRIAL_DURATION = 30 # seconds
-            self._trial = [self.bicycle[a:b]
-                           for a, b in trials
-                           if (t[b] - t[a]) > MINIMUM_TRIAL_DURATION]
-
-            trial_range_index = []
-            for i in range(len(self._trial)):
-                trial_range_index.append(self._calculate_trial_ranges(i))
-            self._trial_range_index = trial_range_index
-
-        return self._trial
-
-    def trials(self, trial_range=4):
-        valid = lambda i: self._trial_range_index[i][4] is not None
-        return (self.trial(i, trial_range)
-                if valid(i) else None
-                for i in range(len(self._trial)))
-
-
-    def trial(self, trial_number, trial_range=5):
-        if self._trial is None:
-            self.calculate_trials()
-
-        if trial_range < 5:
-            extrema = self._trial_range_index[trial_number][trial_range]
-            index = slice(*extrema[np.array([0, -1])])
-            return self._trial[trial_number][index]
-        elif trial_range == 5:
-            try:
-                return self._active_trial_range(trial_number)
-            except TypeError:
-                # missing/problematic velocity signal for rider 0 trial {0, 1}
-                # use manually calculated values
-
-                # assume this error only occurs for rider 0
-                trial = self._trial[trial_number]
-                if trial_number == 0:
-                    index = (trial.time > 80) & (trial.time < 95)
-                elif trial_number == 1:
-                    index = (trial.time > 200) & (trial.time < 280)
-                return trial[index]
-
-        raise ValueError(
-            'Invalid value for \'trial_range\', {}'.format(trial_range))
-
-    def _active_trial_range(self, trial_number):
-        """Extract the range of a trial where the participant is active. This
-        removes the parts of the start and end of a trial and may not capture
-        initial acceleration nor final deceleration.
-        """
-        MIN_SPEED = 2.8 # m/s
-
-        assert self._trial is not None
-        trial = self.trial(trial_number, 4)
-
-        # filter speed
-        v = self._cheby1_lowpass_filter(trial.speed, 0.5)
-
-        edges = np.diff((v > MIN_SPEED).astype(int))
-        edge_index = np.where(edges)[0]
-        edge_type = edges[edge_index] # rising (1) or falling (-1)
-
-        n = len(edge_type)
-        assert n > 0 # verify the signal exceeds MIN_SPEED
-
-        # go through observed cases
-        if n == 1 and edge_type[0] == -1:
-            # single falling edge in the second half of trial
-            # set rising edge to the first sample
-            assert edge_index[0] > n/2
-            index = np.insert(edge_index, 0, 0)
-        elif n == 2 and edge_type[0] == 1 and edge_type[1] == -1:
-            # normal case with single rising edge and single falling edge
-            index = edge_index
-        elif n == 3 and edge_type[0] == -1 and edge_index[0] < 100:
-            # extra falling edge at the start of the trial
-            assert edge_type[1] == 1
-            assert edge_type[2] == -1
-            index = edge_index[1:]
-        else:
-            # some other non-handled case occurs
-            raise NotImplementedError
-        return trial[slice(index[0], index[1])]
-
-    def _cheby1_lowpass_filter(self, x, fc):
-        period = self.bicycle_period
-        fs = 1/period # bicycle sample rate
+    @staticmethod
+    def _cheby1_lowpass_filter(x, fc, fs):
         order = 5
         apass = 0.001 # dB
 
@@ -265,8 +174,12 @@ class Record(object):
         RANGE2_LIMIT = 4 # [kph]
         RANGE2_PERCENT = 0.9 # [percent]
 
-        # filtered speed, range0 extrema
-        v = self._cheby1_lowpass_filter(self._trial[trial_number].speed, 0.08)
+        # filtered speed
+        fs = 1/self.bicycle_period
+        v = self._cheby1_lowpass_filter(self._trial[trial_number].speed,
+                                        0.08, fs)
+
+        # range0 extrema
         r0_minima = scipy.signal.argrelextrema(v, np.less)[0]
         r0_maxima = scipy.signal.argrelextrema(v, np.greater)[0]
         r0 = np.concatenate((r0_minima, r0_maxima))
@@ -314,154 +227,79 @@ class Record(object):
                 r3_maxima,
                 r4)
 
-    def _chebwin_fft(self, x, attenuation=300, max_freq=None):
-        """Calculate the FFT of x with a chebwin window.
+    def _calculate_trials(self):
+        rising_edges = np.where(np.diff(self.bicycle.sync) > 0)[0]
+        trials = zip(rising_edges, rising_edges[1:])
+        t = self.bicycle.time
 
-        Parameters:
-        x: array_like, signal
-        attenuation: float, attenuation of Dolph-Chebyshev window in dB
-        max_freq: float, upper limit for returned frequency vector
+        # filter out trials that are too short
+        MINIMUM_TRIAL_DURATION = 30 # seconds
+        self._trial = [self.bicycle[a:b]
+                       for a, b in trials
+                       if (t[b] - t[a]) > MINIMUM_TRIAL_DURATION]
 
-        Returns:
-        freq: array_like, frequencies
-        xf: array_like, frequency component of signal 'x'
+        trial_range_index = []
+        trials = []
+        for i in range(len(self._trial)):
+            time_ranges = self._calculate_trial_ranges(i)
+            if time_ranges[4] is not None:
+                trial = self._trial[i][slice(*time_ranges[4])]
+                active_range = self._active_trial_range(trial)
+                trial_data = trial[slice(*active_range)]
+            else:
+                # missing/problematic velocity signal for rider 0 trial {0, 1}
+                # use manually calculated values
+
+                # assume this error only occurs for rider 0
+                trial = self._trial[i]
+                if i == 0:
+                    index = (trial.time > 80) & (trial.time < 95)
+                elif i == 1:
+                    index = (trial.time > 200) & (trial.time < 280)
+                trial_data = trial[index]
+
+            trial_range_index.append(time_ranges)
+            trials.append(Trial(trial_data, self.bicycle_period))
+
+        self._trial_range_index = trial_range_index
+        self.trial = trials
+
+    def _active_trial_range(self, trial):
+        """Extract the range of a trial where the participant is active. This
+        removes the parts of the start and end of a trial and may not capture
+        initial acceleration nor final deceleration.
         """
-        window = lambda x: scipy.signal.chebwin(x, at=attenuation, sym=False)
-        freq, xf = fft(x, self.bicycle_period, window)
-        if max_freq is not None:
-            index = freq < max_freq
-        else:
-            index = slice(0, None)
-        return freq[index], xf[index]
+        MIN_SPEED = 2.8 # m/s
 
-    def steer_angle_cutoff(self, trial, intermediate_values=False):
-        freq, xf = self._chebwin_fft(trial['steer angle'], max_freq=2)
-
-        # find local minima in FFT
-        minima = scipy.signal.argrelextrema(xf, np.less)[0]
-        m0 = minima[0]
-        m1 = minima[1]
-        m2 = minima[2]
-
-        # default cutoff frequency
-        cutoff = freq[m1]
-
-        # Handle special cases. The cutoff frequency should maximize frequency
-        # components corresponding with maneuvering and minimize frequency
-        # components corresponding with pedalling. This appears to be the first
-        # bump in the FFT of the steer angle.
-        if freq[m0] > 0.5:
-            # FFT window main lobe too large and first minimum not detected
-            cutoff = 0.6
-        elif freq[m1] < 0.5 and xf[m1] > xf[m0]:
-            # leakage from nearby frequencies results in an invalid minimum
-            for m in minima[2:]:
-                if xf[m] < xf[m0]:
-                    cutoff = freq[m]
-                    break
-        elif freq[m1] > 1 and (freq[m1] - freq[m0]) > 1:
-            # minimum between m0 and m1 not detected
-            cutoff = 0.5*(0.5 + freq[m1])
-        elif np.abs(xf[m1] - xf[m0]) < 0.2*xf[m2] and freq[m0] < 0.5:
-            # m1 too close to m0, frequencies between the two are attenuated
-            # when steer angle is filtered
-            cutoff = 0.33*(freq[m1] + freq[m2])
-
-        if intermediate_values:
-            return cutoff, (freq, xf), minima
-        return cutoff
-
-    def _butter_bandpass_filter(self, x, fc):
+        # filter speed
         fs = 1/self.bicycle_period
-        order = 3
-        wn = np.array([0.1, fc]) / (0.5*fs)
-        b, a = scipy.signal.butter(order, wn, btype='bandpass')
-        return scipy.signal.filtfilt(b, a, x)
+        v = self._cheby1_lowpass_filter(trial.speed, 0.5, fs)
 
-    def filtered_steer_angle(self, trial, fc=None):
-        if fc is None:
-            fc = self.steer_angle_cutoff(trial)
+        edges = np.diff((v > MIN_SPEED).astype(int))
+        edge_index = np.where(edges)[0]
+        edge_type = edges[edge_index] # rising (1) or falling (-1)
 
-        return self._butter_bandpass_filter(trial['steer angle'], fc)
+        n = len(edge_type)
+        assert n > 0 # verify the signal exceeds MIN_SPEED
 
-    def plot_steer_angle_filter_calculation(self, trial_number,
-                                            ax=None, **kwargs):
-        if ax is None:
-            _, ax = plt.subplots(2, 1, **kwargs)
-
-        colors = sns.color_palette('Paired', 10)
-
-        trial = self.trial(trial_number)
-        cutoff, (freq, xf), minima = self.steer_angle_cutoff(trial, True)
-        m0 = minima[0]
-        m1 = minima[1]
-        m2 = minima[2]
-
-        t = trial.time
-        x = trial['steer angle']
-        z_06 = self._butter_bandpass_filter(x, 0.6)
-        z_m1 = self._butter_bandpass_filter(x, freq[m1])
-        z_m2 = self._butter_bandpass_filter(x, freq[m2])
-        z_c = self._butter_bandpass_filter(x, cutoff)
-
-        # plot filtered versions of steer angle signal
-        ax[0].plot(t, z_06,
-                   label='steer angle (fc = 0.6 Hz)',
-                   color=colors[1], alpha=0.6)
-        ax[0].plot(t, z_m1,
-                   label='steer angle (fc = {:0.02f} Hz), m1'.format(freq[m1]),
-                   color=colors[5], alpha=0.6)
-        ax[0].plot(t, z_m2,
-                   label='steer angle (fc = {:0.02f} Hz), m2'.format(freq[m2]),
-                   color=colors[7], alpha=0.6)
-        ax[0].plot(t, z_c, '--',
-                   label='steer angle (fc = {:0.02f} Hz), c'.format(cutoff),
-                   color=colors[9])
-        ax[0].plot(t, x,
-                   label='steer angle (unfiltered)',
-                   color=colors[3])
-        ax[0].set_xlabel('time [s]')
-        ax[0].set_ylabel('speed [m/s]')
-        ax[0].legend()
-
-        # plot FFTs
-        max_freq = 5 # Hz
-        ax[1].plot(*self._chebwin_fft(z_06, max_freq=max_freq),
-                   label='steer angle (fc = 0.6 Hz)',
-                   color=colors[1], alpha=0.6)
-        ax[1].plot(*self._chebwin_fft(z_m1, max_freq=max_freq),
-                   label='steer angle (fc = {:0.02f} Hz), m1'.format(freq[m1]),
-                   color=colors[5], alpha=0.6)
-        ax[1].plot(*self._chebwin_fft(z_m2, max_freq=max_freq),
-                   label='steer angle (fc = {:0.02f} Hz), m2'.format(freq[m2]),
-                   color=colors[7], alpha=0.6)
-        ax[1].plot(*self._chebwin_fft(z_c, max_freq=max_freq), '--',
-                   label='steer angle (fc = {:0.02f} Hz), c'.format(cutoff),
-                   color=colors[9])
-
-        # plot this FFT last and use saved ylim as this dominates due to
-        # the DC  component
-        ylim = ax[1].get_ylim()
-        ax[1].plot(*self._chebwin_fft(x, max_freq=max_freq),
-                   label='steer angle (unfiltered)',
-                   color=colors[3])
-        ax[1].set_ylim(ylim)
-
-        # plot minima markers
-        ax[1].plot(freq[minima][:10], xf[minima][:10],
-                   'X', markersize=10,
-                   color=colors[3], alpha=0.6)
-        ax[1].plot(freq[m1], xf[m1],
-                   'o', markersize=12,
-                   color=colors[5], alpha=0.6)
-        ax[1].plot(freq[m2], xf[m2],
-                   'o', markersize=12,
-                   color=colors[7], alpha=0.6)
-
-        ax[1].set_title('steer angle FFT')
-        ax[1].set_xlabel('frequency [Hz]')
-        ax[1].legend()
-        return ax
+        # go through observed cases
+        if n == 1 and edge_type[0] == -1:
+            # single falling edge in the second half of trial
+            # set rising edge to the first sample
+            assert edge_index[0] > n/2
+            index = np.insert(edge_index, 0, 0)
+        elif n == 2 and edge_type[0] == 1 and edge_type[1] == -1:
+            # normal case with single rising edge and single falling edge
+            index = edge_index
+        elif n == 3 and edge_type[0] == -1 and edge_index[0] < 100:
+            # extra falling edge at the start of the trial
+            assert edge_type[1] == 1
+            assert edge_type[2] == -1
+            index = edge_index[1:]
+        else:
+            # some other non-handled case occurs
+            raise NotImplementedError
+        return index
 
     def plot_timing(self, ax=None, **kwargs):
         def plot_two(ax, data, color, label):
@@ -520,7 +358,9 @@ class Record(object):
 
         ran = self._trial_range_index[trial_number]
         trial = self._trial[trial_number]
-        v = self._cheby1_lowpass_filter(trial.speed)
+        v = self._cheby1_lowpass_filter(trial.speed,
+                                        0.08,
+                                        1/self.bicycle_period)
 
         ax.plot(trial.time, trial.speed, label='speed',
                 alpha=0.5, color=colors[0], zorder=0)
@@ -558,14 +398,13 @@ class Record(object):
         return ax
 
 
-def load_records(sync=False, calculate_trials=True):
+def load_records(sync=False):
     records = [Record(l, b) for l, b in zip(_get_lidar_records(),
                                             _get_bicycle_records())]
     for r in records:
         if sync:
             r.sync()
-        if calculate_trials:
-            r.calculate_trials()
+        r._calculate_trials()
     return records
 
 
