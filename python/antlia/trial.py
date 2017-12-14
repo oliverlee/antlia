@@ -208,6 +208,8 @@ class Trial(object):
         ax.axhline(0, color='black')
         ax.legend()
 
+        # recalculate max score
+        max_score = max(ev.score for ev in events)
         for ev in events:
             t0 = time[ev.start]
             t1 = time[ev.end]
