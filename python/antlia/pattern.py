@@ -136,6 +136,7 @@ _steer_pattern = Pattern([
 ])
 
 
+@functools.total_ordering
 class SteerEvent(object):
     pattern = _steer_pattern
 
@@ -146,11 +147,22 @@ class SteerEvent(object):
         if steer_angle is None:
             steer_angle = trial.filtered_steer_angle()
 
+        self.extrema = window
         self.start = window[0].index
         self.end = window[-1].index
         self.score = self.score(window, steer_angle)
         self.speed = (trial.data.speed[window[0].index:window[-1].index].sum() /
                       (window[-1].index - window[0].index))
+
+    def __eq__(self, other):
+        return (self.score == other.score and
+                self.speed == other.speed and
+                self.start == other.start and
+                self.end == other.end and
+                self.extrema == other.extrema)
+
+    def __lt__(self, other):
+        return self.score < other.score
 
     @staticmethod
     def score(window, signal):

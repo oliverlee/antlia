@@ -166,12 +166,11 @@ class Trial(object):
         ax[1].legend()
         return ax
 
-    def plot_steer_event_detection(self, ax=None, **kwargs):
+    def _get_steer_events(self):
         extrema = ExtremaList(self)
-        pat = SteerEvent.pattern
+        steer_angle = self.filtered_steer_angle()
 
         events = []
-        steer_angle = self.filtered_steer_angle()
         for w in window(extrema.extrema, len(SteerEvent.pattern)):
             try:
                 events.append(SteerEvent(w, self, steer_angle))
@@ -185,6 +184,11 @@ class Trial(object):
         # filter out events with average speed less than 0.9 of max speed
         max_speed = max(ev.speed for ev in events)
         events = [ev for ev in events if ev.speed > 0.9*max_speed]
+
+        return events, extrema, steer_angle
+
+    def plot_steer_event_detection(self, ax=None, **kwargs):
+        events, extrema, steer_angle = self._get_steer_events()
 
         colors = sns.color_palette('Paired', 10)
 
@@ -220,9 +224,10 @@ class Trial(object):
                                for ev in events))
         return ax
 
+    def steer_event_parameters(self):
+        events, _, steer_angle = self._get_steer_events()
+        ev = max(events)
 
-
-
-
-
-
+        index = slice(ev.extrema[0].index, ev.extrema[2].index)
+        # TODO return parameters instead of a data slice
+        return self.data.time[index], steer_angle[index], ev
