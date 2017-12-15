@@ -164,7 +164,7 @@ class Trial(object):
         ax[1].set_title('steer angle FFT')
         ax[1].set_xlabel('frequency [Hz]')
         ax[1].legend()
-        return ax
+        return ax, cutoff, freq[m1], freq[m2]
 
     def _get_steer_events(self):
         extrema = ExtremaList(self)
