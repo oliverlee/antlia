@@ -248,14 +248,17 @@ class Record(object):
                 trial_data = trial[slice(*active_range)]
             else:
                 # missing/problematic velocity signal for rider 0 trial {0, 1}
-                # use manually calculated values
+                # use manually calculated values calculated for an
+                # unsynchronized record
 
                 # assume this error only occurs for rider 0
                 trial = self._trial[i]
+                t0 = self.bicycle.time[0]
                 if i == 0:
-                    index = (trial.time > 80) & (trial.time < 95)
+                    index = (trial.time > (80 + t0)) & (trial.time < (95 + t0))
                 elif i == 1:
-                    index = (trial.time > 200) & (trial.time < 280)
+                    index = ((trial.time > (200 + t0)) &
+                             (trial.time < (280 + t0)))
                 trial_data = trial[index]
 
             trial_range_index.append(time_ranges)
