@@ -58,7 +58,11 @@ class Trial(object):
         minima = scipy.signal.argrelextrema(xf, np.less)[0]
         m0 = minima[0]
         m1 = minima[1]
-        m2 = minima[2]
+        try:
+            m2 = minima[2]
+        except IndexError:
+            raise ValueError(
+                    'Unable to find m2. Data possibly missing samples.')
 
         # default cutoff frequency
         cutoff = freq[m1]
@@ -89,15 +93,13 @@ class Trial(object):
         return cutoff
 
     def plot_steer_angle_filter_calculation(self, ax=None, **kwargs):
-        if ax is None:
-            _, ax = plt.subplots(2, 1, **kwargs)
-
-        colors = sns.color_palette('Paired', 10)
-
         cutoff, (freq, xf), minima = self.steer_angle_cutoff(True)
         m0 = minima[0]
         m1 = minima[1]
-        m2 = minima[2]
+        try:
+            m2 = minima[2]
+        except IndexError:
+            m2 = 18
 
         t = self.data.time
         dt = self.period
@@ -106,6 +108,11 @@ class Trial(object):
         z_m1 = self._butter_bandpass_filter(x, freq[m1], 1/dt)
         z_m2 = self._butter_bandpass_filter(x, freq[m2], 1/dt)
         z_c = self._butter_bandpass_filter(x, cutoff, 1/dt)
+
+        if ax is None:
+            _, ax = plt.subplots(2, 1, **kwargs)
+
+        colors = sns.color_palette('Paired', 10)
 
         # plot filtered versions of steer angle signal
         ax[0].plot(t, z_06,

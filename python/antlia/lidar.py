@@ -340,7 +340,7 @@ class Record(object):
                 if i == 0:
                     index = (trial.time > (80 + t0)) & (trial.time < (95 + t0))
                 elif i == 1:
-                    index = ((trial.time > (200 + t0)) &
+                    index = ((trial.time > (270 + t0)) &
                              (trial.time < (280 + t0)))
                 trial_data = trial[index]
 
