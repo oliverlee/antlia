@@ -126,7 +126,7 @@ class LidarRecord(np.recarray):
         """
         if not callable(time):
             # return a one element LidarRecord
-            return np.where(self.time >= time)[0]
+            return np.where(self.time >= time)[0][:1]
 
         return np.where(time(self.time))[0]
 
