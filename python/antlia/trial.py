@@ -58,7 +58,10 @@ class Trial(object):
         minima = scipy.signal.argrelextrema(xf, np.less)[0]
         m0 = minima[0]
         m1 = minima[1]
-        m2 = minima[2]
+        try:
+            m2 = minima[2]
+        except IndexError:
+            m2 = 18
 
         # default cutoff frequency
         cutoff = freq[m1]
@@ -97,7 +100,10 @@ class Trial(object):
         cutoff, (freq, xf), minima = self.steer_angle_cutoff(True)
         m0 = minima[0]
         m1 = minima[1]
-        m2 = minima[2]
+        try:
+            m2 = minima[2]
+        except IndexError:
+            m2 = 18
 
         t = self.data.time
         dt = self.period
