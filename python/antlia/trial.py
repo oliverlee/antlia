@@ -235,6 +235,41 @@ class Trial(object):
         events, _, steer_angle = self._get_steer_events()
         ev = max(events)
 
-        index = slice(ev.extrema[0].index, ev.extrema[2].index)
-        # TODO return parameters instead of a data slice
-        return self.data.time[index], steer_angle[index], ev
+        def initial_fit_parameters(t, y):
+            # best fit sinusoid
+            ampl = -np.abs(y).max()
+            freq = 1/(2*(t[-1] - t[0]))
+            phase = -t[0]
+            mean = 0
+            return ampl, freq, phase, mean
+
+        def optimize_func(y):
+            return lambda x: x[0]*np.sin(2*np.pi*x[1]*(t + x[2])) + x[3] - y
+
+        def estimate_fit_parameters(t, y):
+            return scipy.optimize.leastsq(
+                    optimize_func(y),
+                    initial_fit_parameters(t, y))[0]
+
+        # get indices for first turn in the steer event
+        # this corresponds to (inflect, minimum, inflect)
+        i0 = ev.extrema[0].index
+        i1 = ev.extrema[2].index
+
+        # get corresponding time and steer angle subset
+        index = slice(i0 - i0, i1 - i0)
+        t = ev.time[index]
+        y = ev.steer_angle[index]
+        estimate = estimate_fit_parameters(t, y)
+        estimate_steer = optimize_func(y)(estimate) + y
+
+        period = 1/estimate[1]
+        if period > 6:
+            # If period is too large, retry fit with last 75% of data
+            n = len(t)//4
+            t = t[n:]
+            y = y[n:]
+            estimate = estimate_fit_parameters(t, y)
+            estimate_steer = optimize_func(y)(estimate) + y
+
+        return estimate, (t, y, estimate_steer), ev

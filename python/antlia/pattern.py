@@ -151,8 +151,12 @@ class SteerEvent(object):
         self.start = window[0].index
         self.end = window[-1].index
         self.score = self.score(window, steer_angle)
-        self.speed = (trial.data.speed[window[0].index:window[-1].index].sum() /
+
+        index = slice(self.start, self.end)
+        self.speed = (trial.data.speed[index].sum() /
                       (window[-1].index - window[0].index))
+        self.time = trial.data.time[index]
+        self.steer_angle = steer_angle[index]
 
     def __eq__(self, other):
         return (self.score == other.score and
