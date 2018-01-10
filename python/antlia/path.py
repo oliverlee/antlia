@@ -22,7 +22,50 @@ def outlier_index(x, y, N):
     return np.reshape(np.argwhere(np.abs(diff) > y), (-1,))
 
 
-def plot_velocity(r, velocity_window_size):
+    from antlia import kalman
+def plot_vel_acc(r, velocity_window_size):
+    t = r['time']
+    v = r['speed']
+    a = r['accelerometer x']
+    dt = np.diff(t).mean()
+
+    v_mov = ff.moving_average(v, velocity_window_size, velocity_window_size/3)
+
+    u = np.reshape(a, (-1, 1, 1))
+    z = np.reshape(v, (-1, 1, 1))
+    oi = [x for x in util.outlier_index(v, 2*v.std(), 128) if x > 128]
+    v_kal = kalman.kalman_velocity(dt, v, u, z, q=5, missed_measurement=oi)
+
+    colors = sns.color_palette('Paired', 10)
+
+    fig, axes = plt.subplots(2, 1, sharex=True)
+    axes = axes.ravel()
+    ax = axes[0]
+    ax.plot(t, v, color=colors[0], alpha=0.5,
+            label='velocity, measured')
+    ax.plot(t[oi], v[oi], color=colors[0], linestyle=' ', marker='X',
+            markersize=10,
+            label='velocity, measured, outliers')
+    ax.plot(t, v_mov, color=colors[1],
+            label='velocity, gaussian weighted moving average, {} samples'.format(
+                velocity_window_size))
+    ax.plot(t, v_kal, color=colors[3],
+            label='velocity, kalman filter')
+    ax.set_xlabel('time [s]')
+    ax.set_ylabel('velocity [m/s]')
+    ax.axhline(0, color='black', linewidth=1, zorder=1)
+    ax.legend()
+
+    ax = axes[1]
+    ax.plot(t, a, color=colors[5],
+            label='deceleration, measured')
+    ax.set_xlabel('time [s]')
+    ax.set_ylabel('deceleration [m/s^2]')
+    ax.axhline(0, color='black', linewidth=1, zorder=1)
+    ax.legend()
+
+
+def plot_vel_fft(r, velocity_window_size):
     charcoal_color = sns.xkcd_palette(['charcoal'])[0]
 
     t = r['time']

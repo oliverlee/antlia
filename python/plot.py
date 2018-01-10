@@ -11,6 +11,7 @@ import seaborn as sns
 
 from antlia import filter as ff
 from antlia import path
+from antlia import record
 from antlia import util
 from antlia import plot_braking as braking
 from antlia import plot_steering as steering
@@ -197,7 +198,7 @@ if __name__ == '__main__':
     for rid, tid, r in recs:
         if tid == 3 or tid == 4:
         #if tid == 4:
-            fig, axes = path.plot_velocity(r, 55)
+            fig, axes = path.plot_vel_fft(r, 55)
             fig.suptitle('filtered velocity and fft rider {} trial {}'.format(
                 rid, tid))
             save_fig(fig)
