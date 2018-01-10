@@ -116,8 +116,8 @@ def get_metrics(rec, window_size=55):
             lockup_ranges)
 
 
-def plot_rider_velocities(recs, rider_id):
-    fig, axes = plt.subplots(2, 2)
+def plot_rider_velocities(recs, rider_id, **kwargs):
+    fig, axes = plt.subplots(2, 2, **kwargs)
     axes = axes.ravel()
 
     colors = sns.color_palette('Paired', 8)
@@ -155,8 +155,8 @@ def plot_rider_velocities(recs, rider_id):
                        color=colors[5], alpha=0.4)
     return fig, axes
 
-def plot_rider_braking_events(recs, rider_id):
-    fig, axes = plt.subplots(2, 2)
+def plot_rider_braking_events(recs, rider_id, **kwargs):
+    fig, axes = plt.subplots(2, 2, **kwargs)
     axes = axes.ravel()
 
     colors = sns.color_palette('Paired', 10)
@@ -212,9 +212,9 @@ def plot_rider_braking_events(recs, rider_id):
     return fig, axes
 
 
-def plot_histograms(stats):
+def plot_histograms(stats, **kwargs):
     colors = sns.husl_palette(6, s=.8, l=.5)
-    fig, axes = plt.subplots(2, 3)
+    fig, axes = plt.subplots(2, 3, **kwargs)
     fig.suptitle('histograms of braking events')
     axes = axes.ravel()
     field = [('slope of regression line [m/s^2]', 'linregress slope', None),
@@ -264,8 +264,8 @@ def plot_bivariates(stats):
     return grids
 
 
-def plot_swarms(stats):
-    fig, axes = plt.subplots(4, 1, sharex=True)
+def plot_swarms(stats, **kwargs):
+    fig, axes = plt.subplots(4, 1, sharex=True, **kwargs)
     fig.suptitle('swarm plot of braking metrics per rider')
     axes = axes.ravel()
     yfields.append(('linregress slope', 'm/s^2'))
