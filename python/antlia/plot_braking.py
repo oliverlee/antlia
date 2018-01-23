@@ -62,15 +62,15 @@ def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
     return largest, merged
 
 
-def get_metrics(rec, window_size=55):
+def get_metrics(trial, window_size=55):
     """ window size in samples
         ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
     """
-    t = rec['time']
-    v = rec['speed']
+    t = trial['time']
+    v = trial['speed']
     filtered_velocity = ff.moving_average(v,
                                           window_size, window_size/2)
-    filtered_acceleration = ff.moving_average(rec['accelerometer x'],
+    filtered_acceleration = ff.moving_average(trial['accelerometer x'],
                                               window_size, window_size/2)
     braking_range, _ = get_trial_braking_indices(filtered_acceleration)
     b0, b1 = braking_range
@@ -155,60 +155,78 @@ def plot_rider_velocities(recs, rider_id, **kwargs):
                        color=colors[5], alpha=0.4)
     return fig, axes
 
+
+def plot_trial_braking_event(trial, ax=None, **kwargs):
+    if ax is None:
+        fig, ax = plt.subplots(**kwargs)
+    else:
+        fig = ax.get_figure()
+
+    colors = sns.color_palette('Paired', 10)
+    vc = colors[1]
+    ac = colors[3]
+
+    try:
+        metrics, vf, af, lockup_ranges = get_metrics(trial)
+    except TypeError:
+        # skip empty input file
+        return fig, ax
+
+    t = trial['time']
+    l0, l1 = metrics['braking range'][0]
+    # fit to 10 second window
+    tw = 10
+    tb = t[l1] - t[l0]
+    assert tb < tw
+    # try to center
+    i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
+    i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
+    # shift to left if the braking event can't be centered
+    if i1 > len(trial):
+        n = i1 - len(trial) + 1
+        i0 -= n
+        i1 -= n
+
+    # plot filtered signals
+    ax.plot(t[i0:i1], vf[i0:i1], color=vc,
+            label='velocity, gaussian weighted moving average')
+    ax.plot(t[i0:i1], af[i0:i1], color=ac,
+            label='acceleration, gaussian weighted moving average')
+    ax.legend()
+    ylim = ax.get_ylim()
+
+    # plot unfiltered signals
+    ax.plot(t[i0:i1], trial['speed'][i0:i1], color=vc, alpha=0.3)
+    ax.plot(t[i0:i1], trial['accelerometer x'][i0:i1], color=ac, alpha=0.3)
+    ax.axhline(0, color='black', linewidth=1,zorder=1)
+    ax.set_ylim(ylim) # use ylim based on filtered data
+
+    # plot braking section
+    ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
+    # plot lockup sections in braking section
+    for lr in lockup_ranges:
+        ax.axvspan(t[lr[0]], t[lr[1]], color=colors[7], alpha=0.5)
+
+    # plot best fit line
+    p = [metrics['linregress slope'], metrics['linregress intercept']]
+    ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
+
+    ax.set_ylabel('m/s, -m/s^2')
+    ax.set_xlabel('time [s]')
+    return fig, ax
+
+
 def plot_rider_braking_events(recs, rider_id, **kwargs):
     fig, axes = plt.subplots(2, 2, **kwargs)
     axes = axes.ravel()
 
     colors = sns.color_palette('Paired', 10)
-    for rid, tid, r in recs:
+    for rid, tid, trial in recs:
         if rider_id != rid:
             continue
-        t = r['time']
-        try:
-            metrics, vf, af, lockup_ranges = get_metrics(r)
-        except TypeError:
-            # skip empty input file
-            continue
-        vc = colors[1]
-        ac = colors[3]
-        l0, l1 = metrics['braking range'][0]
-        # fit to 10 second window
-        tw = 10
-        tb = t[l1] - t[l0]
-        assert tb < tw
-        # try to center
-        i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
-        i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
-        # shift to left if the braking event can't be centered
-        if i1 > len(r):
-            n = i1 - len(r) + 1
-            i0 -= n
-            i1 -= n
 
-        ax = axes[tid - 1]
-        ax.plot(t[i0:i1], vf[i0:i1], color=vc,
-                label='velocity, gaussian weighted moving average')
-        ax.plot(t[i0:i1], af[i0:i1], color=ac,
-                label='acceleration, gaussian weighted moving average')
-        ax.legend()
-        ylim = ax.get_ylim()
-        ax.plot(t[i0:i1], r['speed'][i0:i1], color=vc, alpha=0.3)
-        ax.plot(t[i0:i1], r['accelerometer x'][i0:i1], color=ac, alpha=0.3)
-        ax.set_ylim(ylim)
+        plot_trial_braking_event(trial, axes[tid])
         ax.set_title('rider {} trial {}'.format(rid, tid))
-        ax.set_ylabel('m/s, -m/s^2')
-        ax.set_xlabel('time [s]')
-        ax.axhline(0, color=sns.xkcd_palette(['charcoal'])[0],
-                   linewidth=1,zorder=1)
-        # plot braking section
-        ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
-        # plot lockup sections
-        for lr in lockup_ranges:
-            ax.axvspan(t[lr[0]], t[lr[1]], color=colors[7], alpha=0.5)
-
-        # plot best fit line
-        p = [metrics['linregress slope'], metrics['linregress intercept']]
-        ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
     return fig, axes
 
 
