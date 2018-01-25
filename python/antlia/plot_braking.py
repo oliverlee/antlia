@@ -18,6 +18,8 @@ metrics_dtype = np.dtype([
     ('starting velocity', '<f8'),
     ('braking duration', '<f8'),
     ('braking distance', '<f8'),
+    ('braking starttime', '<f8'),
+    ('braking endtime', '<f8'),
     ('window size', '<i8'),
     ('braking range', '<i8', 2),
     ('lockup ranges', '<i8'),
@@ -96,6 +98,8 @@ def get_metrics(trial, window_size=55):
     # TODO what if best-fit line crosses zero?
     braking_distance = (np.polyval([slope, intercept], [t[b0], t[b1]]).mean() *
                         braking_duration)
+    braking_starttime = t[b0]
+    braking_endtime = t[b1]
     # TODO do filtering in another function and pass filtered signals to this
     # function to calculate metrics
     return (np.array([(slope,
@@ -106,6 +110,8 @@ def get_metrics(trial, window_size=55):
                      start_velocity,
                      braking_duration,
                      braking_distance,
+                     braking_starttime,
+                     braking_endtime,
                      window_size,
                      braking_range,
                      len(lockup_ranges),
