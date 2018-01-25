@@ -26,8 +26,8 @@ metrics_dtype = np.dtype([
 ])
 
 yfields = [('starting velocity', 'm/s'),
-           ('braking duration', 'm'),
-           ('braking distance', 's')]
+           ('braking duration', 's'),
+           ('braking distance', 'm')]
 
 
 def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
