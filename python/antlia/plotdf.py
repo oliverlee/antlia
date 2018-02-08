@@ -19,7 +19,7 @@ def colormap(dataframe, color_key, color_palette):
             dataframe.as_matrix([color_key]))
     return np.array(x).transpose().reshape((-1, 3))
 
-def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None):
+def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
     """Return a vector of colors for each dataframe column, to be used with
     seaborn plots.
 
@@ -44,11 +44,11 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None):
 
     # draw scatter plot on figure
     if kde_key is None and color_map is None:
-        g.plot_joint(plt.scatter)
+        g.plot_joint(plt.scatter, **kwargs)
     else:
         if kde_key is not None:
             color_map = colormap(dataframe, *kde_key)
-        g.plot_joint(plt.scatter, color=color_map)
+        g.plot_joint(plt.scatter, color=color_map, **kwargs)
 
     if kde_key:
         color_key, color_palette = kde_key
