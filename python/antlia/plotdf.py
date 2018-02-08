@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import warnings
 
 def colormap(dataframe, color_key, color_palette):
     """Return a vector of colors for each dataframe column, to be used with
@@ -52,13 +53,16 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
 
     if kde_key:
         color_key, color_palette = kde_key
-        for r in dataframe[color_key].unique():
-            sns.kdeplot(dataframe[x][dataframe[color_key] == r],
-                        ax=g.ax_marg_x, vertical=False,
-                        color=color_palette[int(r)], shade=True)
-            sns.kdeplot(dataframe[y][dataframe[color_key] == r],
-                        ax=g.ax_marg_y, vertical=True,
-                        color=color_palette[int(r)], shade=True)
+        with warnings.catch_warnings():
+            # suppress warnings from plotting multiple kde plots
+            warnings.simplefilter('ignore', RuntimeWarning)
+            for r in dataframe[color_key].unique():
+                sns.kdeplot(dataframe[x][dataframe[color_key] == r],
+                            ax=g.ax_marg_x, vertical=False,
+                            color=color_palette[int(r)], shade=True)
+                sns.kdeplot(dataframe[y][dataframe[color_key] == r],
+                            ax=g.ax_marg_y, vertical=True,
+                            color=color_palette[int(r)], shade=True)
     else:
         # use color from scatter plot
         g.plot_marginals(sns.kdeplot, shade=True)
@@ -68,5 +72,11 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
         g.ax_marg_y.legend_.remove()
     except AttributeError:
         pass
+
+    # rescale limits of kde plots
+    g.ax_marg_x.relim()
+    g.ax_marg_x.autoscale()
+    g.ax_marg_y.relim()
+    g.ax_marg_y.autoscale()
 
     return g
