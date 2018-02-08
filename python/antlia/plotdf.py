@@ -19,7 +19,7 @@ def colormap(dataframe, color_key, color_palette):
             dataframe.as_matrix([color_key]))
     return np.array(x).transpose().reshape((-1, 3))
 
-def plotjoint(x, y, dataframe, kde_key=None, color_map=None):
+def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None):
     """Return a vector of colors for each dataframe column, to be used with
     seaborn plots.
 
@@ -32,10 +32,17 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None):
              This will also set the color of elements in the scatter plot.
     color_map: nx3 color array, If not 'None' and 'kde_key' is not None, plot
                each element with color specified by corresponding row in scatter
-               plot. If this is 'kde_key' is not None, this parameter is
-               ignored.
+               plot. If 'kde_key' is not None, this parameter is ignored.
     """
-    g = sns.JointGrid(x=x, y=y, data=dataframe)
+    if g is None:
+        # initialize figure
+        g = sns.JointGrid(x=x, y=y, data=dataframe)
+    else:
+        # update x and y data
+        g.x = np.asarray(dataframe.get(x, x))
+        g.y = np.asarray(dataframe.get(y, y))
+
+    # draw scatter plot on figure
     if kde_key is None and color_map is None:
         g.plot_joint(plt.scatter)
     else:
@@ -53,7 +60,8 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None):
                         ax=g.ax_marg_y, vertical=True,
                         color=color_palette[int(r)], shade=True)
     else:
-        g.plot_marginals(sns.kdeplot, color='black', shade=True)
+        # use color from scatter plot
+        g.plot_marginals(sns.kdeplot, shade=True)
 
     try:
         g.ax_marg_x.legend_.remove()
