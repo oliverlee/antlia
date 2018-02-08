@@ -149,10 +149,14 @@ class LidarRecord(np.recarray):
         return (np.ma.masked_array(x, index),
                 np.ma.masked_array(y, index))
 
-    def animate(self, xlim=None, ylim=None, speedup=1, color=None, **kwargs):
+    def animate(self, xlim=None, ylim=None,
+                speedup=1, color=None, plot_kwargs={}, **kwargs):
         fig, ax = plt.subplots(**kwargs)
 
-        line, = ax.plot([], [], 'X', animated=True)
+        plot_kwargs.setdefault('linestyle', ' ')
+        plot_kwargs.setdefault('marker', '.')
+
+        line, = ax.plot([], [], animated=True, **plot_kwargs)
         time_template = 'time = {:0.03f} s'
         if speedup != 1:
             time_template += ' (x{:0.1f})'.format(speedup)

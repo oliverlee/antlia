@@ -12,6 +12,9 @@ def colormap(dataframe, color_key, color_palette):
     color_key: column in 'dataframe' to use for an index in 'color_palette'
     color_palette: nx3 color array
     """
+    msg = 'column \'{}\' not in dataframe'.format(color_key)
+    assert color_key in dataframe.columns.values, msg
+
     x = np.vectorize(lambda x: color_palette[int(x)])(
             dataframe.as_matrix([color_key]))
     return np.array(x).transpose().reshape((-1, 3))
