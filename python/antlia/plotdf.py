@@ -55,6 +55,10 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None):
     else:
         g.plot_marginals(sns.kdeplot, color='black', shade=True)
 
-    g.ax_marg_x.legend_.remove()
-    g.ax_marg_y.legend_.remove()
+    try:
+        g.ax_marg_x.legend_.remove()
+        g.ax_marg_y.legend_.remove()
+    except AttributeError:
+        pass
+
     return g
