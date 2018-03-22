@@ -131,7 +131,7 @@ class Trial(object):
                    label='steer angle (unfiltered)',
                    color=colors[3])
         ax[0].set_xlabel('time [s]')
-        ax[0].set_ylabel('speed [m/s]')
+        ax[0].set_ylabel('steer angle [rad]')
         ax[0].legend()
 
         # plot FFTs
