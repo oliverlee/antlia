@@ -73,6 +73,9 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
     except AttributeError:
         pass
 
+    g.ax_joint.relim()
+    g.ax_joint.autoscale()
+
     # rescale limits of kde plots
     g.ax_marg_x.relim()
     g.ax_marg_x.autoscale()
