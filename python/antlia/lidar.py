@@ -76,7 +76,10 @@ def _get_lidar_records(convert_dtype=True, index=None):
 
     records = []
     if index is None:
-        index = slice()
+        index = slice(None)
+    else:
+        index = slice(index, index + 1)
+
     for filename in LIDAR_RECORD_FILES[index]:
         with open(filename, 'rb') as f:
             x = np.fromfile(f, LIDAR_RECORD_DTYPE)
@@ -108,6 +111,9 @@ def _get_bicycle_records(index=None):
     records = []
     if index is None:
         index = slice(None)
+    else:
+        index = slice(index, index + 1)
+
     for filename in BICYCLE_RECORD_FILES[index]:
         r = load_file(filename, calibration['convbike'])
         records.append(r)
