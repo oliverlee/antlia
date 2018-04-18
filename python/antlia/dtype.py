@@ -40,4 +40,10 @@ LIDAR_CONVERTED_DTYPE = np.dtype([
 
 def load_converted_record(filename):
     with gzip.open(filename, 'rb') as f:
-         return pickle.load(f).view(np.recarray)
+        try:
+            # specify encoding for Python 3
+            record = pickle.load(f, encoding='bytes')
+        except:
+            record = pickle.load(f)
+        finally:
+            return record.view(np.recarray)
