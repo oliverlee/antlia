@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import gzip
+import pickle
 import numpy as np
 
 LIDAR_NUM_ANGLES = 1521
@@ -34,3 +36,8 @@ LIDAR_CONVERTED_DTYPE = np.dtype([
     ('gps', 'f8', (3,)),
     ('distance', 'f8', (LIDAR_NUM_ANGLES,)),
 ])
+
+
+def load_converted_record(filename):
+    with gzip.open(filename, 'rb') as f:
+         return pickle.load(f).view(np.recarray)
