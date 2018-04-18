@@ -55,7 +55,10 @@ def convert_bag(bag):
         else:
             raise KeyError('Unhandled topic: {}'.format(topic))
 
-    return np.concatenate(record)
+    data = np.concatenate(record)
+    # np.concat doesn't preserve recarray type
+    data['time'] -= data['time'][0]
+    return data
 
 
 if __name__ == '__main__':
@@ -81,6 +84,7 @@ if __name__ == '__main__':
             # convert to outfile if provided
             outfile = sys.argv[2]
             record = convert_bag(bag)
+            print(record['time'])
 
             if not outfile.endswith(OUTFILE_EXT):
                 outfile += OUTFILE_EXT
