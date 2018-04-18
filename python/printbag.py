@@ -17,9 +17,11 @@
 import sys
 import rosbag
 
-def decode_bag(bag):
+def print_bag(bag):
     topics = ['/scan', '/flagbutton_pressed']
-    return [message for message in bag.read_messages(topics=topics)]
+    for message in bag.read_messages(topics=topics):
+        print(message)
+
 
 if __name__ == '__main__':
     if len(sys.argv) < 2:
@@ -36,7 +38,7 @@ if __name__ == '__main__':
         outfile = sys.argv[2]
 
     with rosbag.Bag(filename) as bag:
-        print(decode_bag(bag))
+        print_bag(bag)
 
     sys.exit()
 
