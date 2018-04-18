@@ -15,6 +15,10 @@
     'int' and 'long' are the same size on the raspberry pi (32 bits).
 """
 import sys
+import logging
+
+# suppress logging warnings due to rospy
+logging.basicConfig(filename='/dev/null')
 import rosbag
 
 def print_bag(bag):
@@ -35,6 +39,7 @@ if __name__ == '__main__':
     filename = sys.argv[1]
 
     if len(sys.argv) == 3:
+        # convert to outfile if provided
         outfile = sys.argv[2]
 
     with rosbag.Bag(filename) as bag:
