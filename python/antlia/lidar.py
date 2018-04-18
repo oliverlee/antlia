@@ -62,7 +62,7 @@ assert LIDAR_RECORD_FILES, "No LIDAR records found!"
 assert BICYCLE_RECORD_FILES, "No bicycle records found!"
 
 
-def _get_lidar_records(convert_dtype=True):
+def _get_lidar_records(convert_dtype=True, index=None):
     """Returns a list of LIDAR records.
 
     Parameters:
@@ -75,7 +75,12 @@ def _get_lidar_records(convert_dtype=True):
     float_dtype = np.dtype(','.join(len(LIDAR_RECORD_DTYPE) * ['f8']))
 
     records = []
-    for filename in LIDAR_RECORD_FILES:
+    if index is None:
+        index = slice(None)
+    else:
+        index = slice(index, index + 1)
+
+    for filename in LIDAR_RECORD_FILES[index]:
         with open(filename, 'rb') as f:
             x = np.fromfile(f, LIDAR_RECORD_DTYPE)
             if convert_dtype:
@@ -96,7 +101,7 @@ def _get_lidar_records(convert_dtype=True):
     return records
 
 
-def _get_bicycle_records():
+def _get_bicycle_records(index=None):
     # load calibration data
     calibration_path = os.path.join(os.path.dirname(__file__),
                                     '..', r'config.p')
@@ -104,7 +109,12 @@ def _get_bicycle_records():
         calibration = pickle.load(f)
 
     records = []
-    for filename in BICYCLE_RECORD_FILES:
+    if index is None:
+        index = slice(None)
+    else:
+        index = slice(index, index + 1)
+
+    for filename in BICYCLE_RECORD_FILES[index]:
         r = load_file(filename, calibration['convbike'])
         records.append(r)
     return records
@@ -488,9 +498,9 @@ class Record(object):
         return ax
 
 
-def load_records(sync=False):
-    records = [Record(l, b) for l, b in zip(_get_lidar_records(),
-                                            _get_bicycle_records())]
+def load_records(sync=False, index=None):
+    records = [Record(l, b) for l, b in zip(_get_lidar_records(index=index),
+                                            _get_bicycle_records(index=index))]
     for r in records:
         if sync:
             r.sync()
