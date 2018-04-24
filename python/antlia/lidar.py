@@ -32,7 +32,7 @@ class LidarRecord(np.recarray):
         index = self.frame_index(time)
         return self[index]
 
-    def cartesian(self, xlim=None, ylim=None):
+    def cartesian(self, xlim=None, ylim=None, rlim=None):
         rho = self.distance
         x = rho*np.cos(LIDAR_ANGLES)
         y = rho*np.sin(LIDAR_ANGLES)
@@ -44,10 +44,13 @@ class LidarRecord(np.recarray):
         if ylim is not None:
             ymin, ymax = ylim
             index = index | (y < ymin) | (y > ymax)
+        if rlim is not None:
+            rmin, rmax = rlim
+            index = index | (rho < rmin) | (rho > rmax)
         return (np.ma.masked_array(x, index),
                 np.ma.masked_array(y, index))
 
-    def animate(self, xlim=None, ylim=None,
+    def animate(self, xlim=None, ylim=None, rlim=None,
                 speedup=1, color=None, plot_kwargs={}, **kwargs):
         fig, ax = plt.subplots(**kwargs)
 
@@ -76,7 +79,7 @@ class LidarRecord(np.recarray):
 
         def update(i):
             # get an array of one element so it's still a LidarRecord
-            x, y = self[[i]].cartesian(xlim, ylim)
+            x, y = self[[i]].cartesian(xlim, ylim, rlim)
             line.set_data(x, y)
 
             if color is not None:
