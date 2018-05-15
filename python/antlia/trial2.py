@@ -11,7 +11,7 @@ class Trial2(Trial):
             self.lidar = lidar_data
             self.bicycle = self.data
 
-            self.event_indices = self._detect_event()
+            self.event_timerange = self._detect_event()
 
     def _detect_event(self):
         mask_a = self.bicycle.speed > 1
@@ -35,4 +35,6 @@ class Trial2(Trial):
         evti = [e for e in evti if e[1] - e[0] > 100]
 
         assert len(evti) > 0, "unable to detect event for this trial"
-        return evti[-1]
+
+        event = evti[-1]
+        return self.bicycle.time[event[0]], self.bicycle.time[event[1]]
