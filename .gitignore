@@ -2,6 +2,9 @@
 *.swp
 *.swo
 
+# compiled python files
+*.pyc
+
 # OSX files
 .DS_Store
 
