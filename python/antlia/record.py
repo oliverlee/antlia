@@ -269,7 +269,7 @@ class Record(object):
                 rising = insort(rising, i0)
                 falling = insort(falling, i0 + 1)
 
-        # we expect to always edge pairs for the sync signal
+        # we expect to always have paired edges for the sync signal
         assert len(rising) == len(falling)
 
         # we want the data after a sync falling edge and before a rising edge
