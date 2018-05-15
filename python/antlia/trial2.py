@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-import scipy.signal
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 from antlia.trial import Trial
 import antlia.util as util
@@ -39,4 +36,3 @@ class Trial2(Trial):
 
         assert len(evti) > 0, "unable to detect event for this trial"
         return evti[-1]
-
