@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import bisect
 import glob
 import os
 import pickle
@@ -244,15 +245,29 @@ class Record(object):
         The braking and overtaking event is calculated.
 
         This is used with data collected in Gothenburg April 2018.
+
+        Parameters
+        missing_sync: array_like of approximate time of missing sync signals
+
+        Notes:
+        All elements in missing_sync are treated as timestamps for rising edges.
+        The corresponding falling edge occurs 1 sample later.
         """
 
         edges = np.diff(self.bicycle.sync.astype(int))
         rising = np.where(edges > 0)[0]
         falling = np.where(edges < 0)[0]
 
-        if missing_sync:
-            # add in missing sync signals
-            pass
+        if missing_sync is not None:
+            def insort(a, value):
+                return np.insert(a, np.searchsorted(a, value), value)
+
+            for m in missing_sync:
+                i0 = np.where(self.bicycle.time >= m)[0][0]
+
+                # add in missing sync signals
+                rising = insort(rising, i0)
+                falling = insort(falling, i0 + 1)
 
         # we expect to always edge pairs for the sync signal
         assert len(rising) == len(falling)
