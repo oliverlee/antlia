@@ -94,3 +94,40 @@ def reduce_runs(signal, tol=1e-3):
         index.append(n - 1)
 
     return signal[index], index
+
+
+def debounce(x, decay=100):
+    """Debounce a digital signal.
+
+    Parameters:
+    x: array_like
+    decay: int, size of edge filter used when debouncing an edge
+
+    Example:
+    > x = np.r_[0, 0, 1, 1, 1, 1, 0, 1, 0, 0]
+    > debounce(x).astype(int)
+    [0 0 1 1 1 1 1 1 0 0]
+    """
+    edges = np.zeros(x.shape)
+    edges[1:] = np.diff(x.astype(int))
+
+    n = edges.shape[0]
+    for i in range(n):
+        if edges[i] == -1:
+            for j in range(min(decay, n - i)):
+                if edges[i + j] == 1:
+                    edges[i] = 0
+                    edges[i + j] = 0
+                    break
+
+    return np.cumsum(edges) + x[0]
+
+
+if __name__ == '__main__':
+    x = np.r_[0, 0, 1, 1, 1, 1, 0, 1, 0, 0]
+    print(x)
+    print(debounce(x).astype(int))
+
+    x2 = np.r_[1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 0]
+    print(x2)
+    print(debounce(x2).astype(int))
