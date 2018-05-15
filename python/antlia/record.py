@@ -13,6 +13,7 @@ import seaborn as sns
 
 from antlia.util import reduce_runs
 from antlia.trial import Trial
+from antlia.trial2 import Trial2
 from antlia.lidar import LidarRecord
 from antlia.dtype import LIDAR_ANGLES, LIDAR_RECORD_DTYPE, LIDAR_CONVERTED_DTYPE
 
@@ -237,6 +238,44 @@ class Record(object):
         wn = fc / (0.5*fs)
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
+
+    def _calculate_trials2(self, missing_sync=None):
+        """Calculate trials from bicycle and lidar data using sync signals.
+        The braking and overtaking event is calculated.
+
+        This is used with data collected in Gothenburg April 2018.
+        """
+
+        edges = np.diff(self.bicycle.sync.astype(int))
+        rising = np.where(edges > 0)[0]
+        falling = np.where(edges < 0)[0]
+
+        if missing_sync:
+            # add in missing sync signals
+            pass
+
+        # we expect to always edge pairs for the sync signal
+        assert len(rising) == len(falling)
+
+        # we want the data after a sync falling edge and before a rising edge
+        trial_indices = list(zip(falling[:-1], rising[1:]))
+
+        trials = []
+        for i0, i1 in trial_indices:
+            time0 = self.bicycle.time[i0]
+            time1 = self.bicycle.time[i1]
+            j0 = self.lidar.frame_index(time0)[0]
+            j1 = self.lidar.frame_index(time1)[0]
+
+            # allow one extra end frame for lidar data in case it is necessary
+            # for interpolation
+            bicycle_data = self.bicycle[i0:i1]
+            lidar_data = self.lidar[j0:j1 + 1]
+
+            trials.append(Trial2(bicycle_data, lidar_data, self.bicycle_period))
+
+        self.trials = trials
+
 
     def _calculate_trial_ranges(self, trial_number):
         """In a trial, we normally observe 3 phases. We describe each phase as:
