@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import glob
+import itertools
 import os
 import pickle
+import warnings
 
 import h5py
 import numpy as np
@@ -242,18 +244,27 @@ class Record(object):
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
 
-    def _calculate_trials2(self, missing_sync=None):
+    def _calculate_trials2(self, missing_sync=None, trial_mask=None):
         """Calculate trials from bicycle and lidar data using sync signals.
         The braking and overtaking event is calculated.
 
         This is used with data collected in Gothenburg April 2018.
 
-        Parameters
+        Parameters:
         missing_sync: array_like of approximate time of missing sync signals
+        trial_mask: int or slice or array_like, any valid numpy array index of
+                    trial indices to ignore
 
         Notes:
         All elements in missing_sync are treated as timestamps for rising edges.
         The corresponding falling edge occurs 1 sample later.
+
+        Example:
+        > r = Record(lidar_record, bicycle_record)
+        > r.sync()
+        > r._calculate_trials2(
+              missing_sync=[650],
+              skip_trial=0)
         """
 
         edges = np.diff(self.bicycle.sync.astype(int))
@@ -275,7 +286,13 @@ class Record(object):
         assert len(rising) == len(falling)
 
         # we want the data after a sync falling edge and before a rising edge
-        trial_indices = list(zip(falling[:-1], rising[1:]))
+        trial_indices = zip(falling[:-1], rising[1:])
+
+        if trial_mask is not None:
+            # apply a mask to the indices
+            selectors = np.ones(len(rising) - 1, dtype=int)
+            selectors[trial_mask] = 0
+            trial_indices = itertools.compress(trial_indices, selectors)
 
         trials = []
         for i0, i1 in trial_indices:
@@ -291,6 +308,11 @@ class Record(object):
 
             trials.append(Trial2(bicycle_data, lidar_data, self.bicycle_period))
 
+        if len(trials) != 18:
+            msg = ('Unexpected number of trials (got {}, not {}).' +
+                    ' Consider using \'trial_mask\' to mask specific ' +
+                    'trials.').format(len(trials), 18)
+            warnings.warn(msg, UserWarning)
         self.trials = trials
 
 
