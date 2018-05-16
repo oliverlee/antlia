@@ -24,6 +24,8 @@ class Trial2(Trial):
             self.event_timerange = (self.bicycle.time[self.event_indices[0]],
                                     self.bicycle.time[self.event_indices[1]])
 
+            self.event_type = self._classify_event()
+
     def _detect_event(self):
         """Event is detected using two masks, one on the bicycle speed sensor
         and one on the lidar data. Mask A detects when the bicycle speed is
@@ -62,5 +64,20 @@ class Trial2(Trial):
         The event is classified by comparing the velocity difference at the
         event start and end.
         """
-        return EventType.Braking
+        BRAKING_VELOCITY_THRESHOLD = 0.85
+
+
+        # Compare first eighth and last eighth
+        i0, i1 = self.event_indices
+        a0 = i0
+        a1 = int(a0 + (i1 - i0)/8)
+        b1 = i1
+        b0 = int(b1 - (i1 - i0)/8)
+
+        v0 = np.mean(self.bicycle.speed[a0:a1])
+        v1 = np.mean(self.bicycle.speed[b0:b1])
+        if v1/v0 < BRAKING_VELOCITY_THRESHOLD:
+            return EventType.Braking
+
+        return EventType.Overtaking
 
