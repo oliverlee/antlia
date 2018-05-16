@@ -214,6 +214,9 @@ def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
     ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
     # plot lockup sections in braking section
     for lr in lockup_ranges:
+        if lr[1] < i0 or lr[0] > i1:
+            # skip plotting of lockup ranges outside the event
+            continue
         ax.axvspan(t[lr[0]], t[lr[1]], color=colors[7], alpha=0.5)
 
     # plot best fit line
