@@ -32,11 +32,21 @@ class Trial2(Trial):
         greater than 1. Mask B detects if any object is visible to the lidar,
         within the bounding box specified by (0, 0) and (60, 4) with respect to
         the lidar reference frame.
+
+        A small negative bounding box is also used to ignore errorneous lidar
+        data.
         """
         mask_a = self.bicycle.speed > 1
-        mask_b = self.lidar.cartesian(
+
+        bbplus = self.lidar.cartesian(
                     xlim=(0, 60),
-                    ylim=(0, 4))[0].count(axis=1) > 1
+                    ylim=(0, 4))[0].count(axis=1)
+        bbminus = self.lidar.cartesian(
+                    xlim=(3.8, 4.3),
+                    ylim=(2.9, 3.4))[0].count(axis=1)
+        bbplus -= bbminus
+
+        mask_b = bbplus > 1
 
         # interpolate mask_b from lidar time to bicycle time
         mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
@@ -64,7 +74,7 @@ class Trial2(Trial):
         The event is classified by comparing the velocity difference at the
         event start and end.
         """
-        BRAKING_VELOCITY_THRESHOLD = 0.85
+        BRAKING_VELOCITY_THRESHOLD = 0.80
 
 
         # Compare first eighth and last eighth
