@@ -64,7 +64,7 @@ def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
     return largest, merged
 
 
-def get_metrics(trial, window_size=55):
+def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
     """ window size in samples
         ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
     """
@@ -74,7 +74,8 @@ def get_metrics(trial, window_size=55):
                                           window_size, window_size/2)
     filtered_acceleration = ff.moving_average(trial['accelerometer x'],
                                               window_size, window_size/2)
-    braking_range, _ = get_trial_braking_indices(filtered_acceleration)
+    braking_range, _ = get_trial_braking_indices(
+            filtered_acceleration, braking_threshold, min_size)
     b0, b1 = braking_range
 
     # determine if wheel lockup occurs
@@ -162,7 +163,7 @@ def plot_rider_velocities(recs, rider_id, **kwargs):
     return fig, axes
 
 
-def plot_trial_braking_event(trial, ax=None, **kwargs):
+def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
     if ax is None:
         fig, ax = plt.subplots(**kwargs)
     else:
@@ -173,7 +174,9 @@ def plot_trial_braking_event(trial, ax=None, **kwargs):
     ac = colors[3]
 
     try:
-        metrics, vf, af, lockup_ranges = get_metrics(trial)
+        if metrics_kw is None:
+            metrics_kw = {}
+        metrics, vf, af, lockup_ranges = get_metrics(trial, **metrics_kw)
     except TypeError:
         # skip empty input file
         return fig, ax
