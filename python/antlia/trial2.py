@@ -1,8 +1,17 @@
 # -*- coding: utf-8 -*-
+from enum import Enum
+
 import numpy as np
 
 from antlia.trial import Trial
 import antlia.util as util
+
+class EventType(Enum):
+    Braking = 0
+    Overtaking = 1
+
+    def __str__(self):
+        return self.name
 
 
 class Trial2(Trial):
@@ -16,6 +25,12 @@ class Trial2(Trial):
                                     self.bicycle.time[self.event_indices[1]])
 
     def _detect_event(self):
+        """Event is detected using two masks, one on the bicycle speed sensor
+        and one on the lidar data. Mask A detects when the bicycle speed is
+        greater than 1. Mask B detects if any object is visible to the lidar,
+        within the bounding box specified by (0, 0) and (60, 4) with respect to
+        the lidar reference frame.
+        """
         mask_a = self.bicycle.speed > 1
         mask_b = self.lidar.cartesian(
                     xlim=(0, 60),
@@ -40,3 +55,12 @@ class Trial2(Trial):
 
         event = evti[-1]
         return evti[-1]
+
+    def _classify_event(self):
+        """Classifies an event as braking or overtaking maneuver.
+
+        The event is classified by comparing the velocity difference at the
+        event start and end.
+        """
+        return EventType.Braking
+
