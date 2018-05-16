@@ -203,6 +203,9 @@ class Record(object):
     kinds = ('lidar', 'bicycle')
 
     def __init__(self, lidar_record, bicycle_record):
+        assert hasattr(lidar_record, 'distance')
+        assert hasattr(bicycle_record, 'speed')
+
         self.lidar = LidarRecord(lidar_record)
         self.bicycle = bicycle_record
         self.synced = None
