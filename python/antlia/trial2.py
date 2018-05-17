@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from enum import Enum
 from collections import namedtuple
+import warnings
 
 import numpy as np
 
@@ -113,7 +114,10 @@ class Trial2(Trial):
                     raise IndexError(msg)
                 evt_index = (i, evt_index[1])
                 break
-        assert entry_time is not None, 'No cyclist entry detected'
+        if entry_time is None:
+            msg = 'Unable to detect cyclist entry for event starting at '
+            msg += 't = {0:.3f} seconds'.format(self.bicycle.time[evt_index[0]])
+            warnings.warn(msg, UserWarning)
 
         # find time where cyclist has finished overtaking obstacle, if it exists
         exit_time = None
@@ -132,7 +136,7 @@ class Trial2(Trial):
                 evt_index = (evt_index[0], i - 1)
                 break
 
-        # classify evt_index type
+        # classify event type
         event_type = EventType.Overtaking
         if exit_time is None:
             event_type = EventType.Braking
