@@ -44,12 +44,13 @@ class Trial2(Trial):
         """Event is detected using two masks, one on the bicycle speed sensor
         and one on the lidar data. Mask A detects when the bicycle speed is
         greater than 0.5. Mask B detects if any object is visible to the lidar,
-        within the bounding box specified by (0, 0) and (60, 4) with respect to
-        the lidar reference frame.
+        within the bounding box specified by (-20, 1.0) and (60, 3.5) with
+        respect to the lidar reference frame. The obstacle is ignored with the
+        use of a negative bounding box.
 
         This region is then further reduced by detecting the cyclist appearing
-        in the bounding box (30, 2), (50, 4) and (possibly, in the case of
-        overtaking) and in the bounding box (-20, 2), (-10, 4).
+        in the bounding box (20, 2), (50, 3.5) and (possibly, in the case of
+        overtaking) and in the bounding box (-20, 2), (-10, 3.5).
 
         Parameters:
         bbmask_kw: dict, keywords supplied to lidar.cartesian() for an area to
@@ -59,8 +60,14 @@ class Trial2(Trial):
         mask_a = self.bicycle.speed > 0.5
 
         bbplus = self.lidar.cartesian(
-                    xlim=(0, 60),
-                    ylim=(0.5, 3.5))[0].count(axis=1)
+                    xlim=(-20, 60),
+                    ylim=(1.0, 3.5))[0].count(axis=1)
+
+        # subtract the obstacle
+        bbplus -= self.lidar.cartesian(
+                    xlim=(-5, -2),
+                    ylim=(2.90, 3.25))[0].count(axis=1)
+
         if bbmask_kw is not None:
             bbminus = self.lidar.cartesian(**bbmask_kw)[0].count(axis=1)
             mask_b = bbplus - bbminus > 1
