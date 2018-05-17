@@ -135,6 +135,11 @@ class Trial2(Trial):
                     raise IndexError(msg)
                 evt_index = (evt_index[0], i - 1)
                 break
+        if exit_time is None and self.bicycle.speed[evt_index[1]] > 1.5:
+            msg = 'Unable to detect cyclist exiting or braking for event '
+            msg += 'ending at t = '
+            msg += '{0:.3f} seconds'.format(self.bicycle.time[evt_index[1]])
+            warnings.warn(msg, UserWarning)
 
         # classify event type
         event_type = EventType.Overtaking
