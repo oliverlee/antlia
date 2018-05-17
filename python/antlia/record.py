@@ -244,7 +244,8 @@ class Record(object):
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
 
-    def _calculate_trials2(self, missing_sync=None, trial_mask=None):
+    def _calculate_trials2(self, missing_sync=None, trial_mask=None,
+                           lidar_bbmask=None):
         """Calculate trials from bicycle and lidar data using sync signals.
         The braking and overtaking event is calculated.
 
@@ -254,6 +255,8 @@ class Record(object):
         missing_sync: array_like of approximate time of missing sync signals
         trial_mask: int or slice or array_like, any valid numpy array index of
                     trial indices to ignore
+        lidar_bbmask: dict, keywords to pass to lidar.cartesian() for a bounding
+                      box to exclude during event detection
 
         Notes:
         All elements in missing_sync are treated as timestamps for rising edges.
@@ -306,7 +309,10 @@ class Record(object):
             bicycle_data = self.bicycle[i0:i1]
             lidar_data = self.lidar[j0:j1 + 1]
 
-            trials.append(Trial2(bicycle_data, lidar_data, self.bicycle_period))
+            trials.append(Trial2(bicycle_data,
+                                 lidar_data,
+                                 self.bicycle_period,
+                                 lidar_bbmask))
 
         if len(trials) != 18:
             msg = ('Unexpected number of trials (got {}, not {}).' +

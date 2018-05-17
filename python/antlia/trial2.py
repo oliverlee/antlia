@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from enum import Enum
+from collections import namedtuple
 
 import numpy as np
 
@@ -13,38 +14,43 @@ class EventType(Enum):
     def __str__(self):
         return self.name
 
+EventClassificationData = namedtuple('EventClassificationData',
+                                     ['v0', 'v1', 'vratio'])
 
 class Trial2(Trial):
-    def __init__(self, bicycle_data, lidar_data, period):
+    def __init__(self, bicycle_data, lidar_data, period, lidar_bbmask=None):
             super().__init__(bicycle_data, period)
             self.lidar = lidar_data
             self.bicycle = self.data
 
-            self.event_indices = self._detect_event()
-            self.event_timerange = (self.bicycle.time[self.event_indices[0]],
-                                    self.bicycle.time[self.event_indices[1]])
+            # self.event_indices
+            # self.event_timerange
+            self._detect_event(bbmask_kw=lidar_bbmask)
 
-            self.event_type = self._classify_event()
+            # self.event_type
+            # self.event_classification_data
+            self._classify_event()
 
-    def _detect_event(self):
+    def _detect_event(self, bbmask_kw=None):
         """Event is detected using two masks, one on the bicycle speed sensor
         and one on the lidar data. Mask A detects when the bicycle speed is
         greater than 1. Mask B detects if any object is visible to the lidar,
         within the bounding box specified by (0, 0) and (60, 4) with respect to
         the lidar reference frame.
 
-        A small negative bounding box is also used to ignore errorneous lidar
-        data.
+        Parameters:
+        bbmask_kw: dict, keywords supplied to lidar.cartesian() for an area to
+                   ignore for event detection. This is used in the event of
+                   erroneous lidar data.
         """
-        mask_a = self.bicycle.speed > 1
+        mask_a = self.bicycle.speed > 0.5
 
         bbplus = self.lidar.cartesian(
                     xlim=(0, 60),
                     ylim=(0, 4))[0].count(axis=1)
-        bbminus = self.lidar.cartesian(
-                    xlim=(3.8, 4.3),
-                    ylim=(2.9, 3.4))[0].count(axis=1)
-        bbplus -= bbminus
+        if bbmask_kw is not None:
+            bbminus = self.lidar.cartesian(**bbmask_kw)[0].count(axis=1)
+            bbplus -= bbminus
 
         mask_b = bbplus > 1
 
@@ -60,13 +66,18 @@ class Trial2(Trial):
 
         evti = list(zip(rising, falling))
 
-        # filter out events with a minimum size
-        evti = [e for e in evti if e[1] - e[0] > 100]
+        # filter out events with a minimum size and minimum average speed
+        MIN_TIME_DURATION = 100 # in samples
+        MIN_AVG_SPEED = 2 # in m/s
+        evti = [e for e in evti
+                if ((e[1] - e[0] > MIN_TIME_DURATION) and
+                    (np.mean(self.bicycle.speed[e[0]:e[1]]) > MIN_AVG_SPEED))]
 
         assert len(evti) > 0, "unable to detect event for this trial"
 
-        event = evti[-1]
-        return evti[-1]
+        self.event_indices = evti[-1]
+        self.event_timerange = (self.bicycle.time[self.event_indices[0]],
+                                self.bicycle.time[self.event_indices[1]])
 
     def _classify_event(self):
         """Classifies an event as braking or overtaking maneuver.
@@ -86,8 +97,11 @@ class Trial2(Trial):
 
         v0 = np.mean(self.bicycle.speed[a0:a1])
         v1 = np.mean(self.bicycle.speed[b0:b1])
-        if v1/v0 < BRAKING_VELOCITY_THRESHOLD:
-            return EventType.Braking
+        vratio = v1/v0
+        self.event_classification_data = EventClassificationData(v0, v1, vratio)
 
-        return EventType.Overtaking
+        if vratio < BRAKING_VELOCITY_THRESHOLD:
+            self.event_type = EventType.Braking
+        else:
+            self.event_type = EventType.Overtaking
 
