@@ -60,7 +60,7 @@ class Trial2(Trial):
 
         bbplus = self.lidar.cartesian(
                     xlim=(0, 60),
-                    ylim=(0, 4))[0].count(axis=1)
+                    ylim=(0.5, 3.5))[0].count(axis=1)
         if bbmask_kw is not None:
             bbminus = self.lidar.cartesian(**bbmask_kw)[0].count(axis=1)
             mask_b = bbplus - bbminus > 1
@@ -93,10 +93,10 @@ class Trial2(Trial):
         # reduce region using entry and exit bounding box detection
         entry_mask = self.lidar.cartesian(
                         xlim=(20, 50),
-                        ylim=(2, 4))[0].count(axis=1) > 1
+                        ylim=(2, 3.5))[0].count(axis=1) > 1
         exit_mask = self.lidar.cartesian(
                         xlim=(-20, -10),
-                        ylim=(2, 4))[0].count(axis=1) > 1
+                        ylim=(2, 3.5))[0].count(axis=1) > 1
 
         # find time where cyclist enters lidar vision
         entry_time = None
