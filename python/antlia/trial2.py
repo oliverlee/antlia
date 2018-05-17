@@ -81,7 +81,7 @@ class Trial2(Trial):
         evti = list(zip(rising, falling))
 
         # filter out events with a minimum size and minimum average speed
-        MIN_TIME_DURATION = 100 # in samples
+        MIN_TIME_DURATION = int(5.5 * 125) # in samples
         MIN_AVG_SPEED = 2 # in m/s
         evti = [e for e in evti
                 if ((e[1] - e[0] > MIN_TIME_DURATION) and
