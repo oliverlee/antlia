@@ -667,31 +667,21 @@ class SampledTimeSignal(TimeSignal):
         if (other.signal.shape[0] > self.signal.shape[0]):
             return -other.sync_offset(self)
 
-        c = np.correlate(self.signal, other.signal, mode='valid')
-
-        # If synchronization failure, prepend data to longer signal and try
-        # again. This is much faster than using 'full' mode in np.correlate().
         sync_success_limit = 0.9 * self.signal.sum();
+
+        c = np.correlate(self.signal, other.signal, mode='valid')
         index = c.argmax()
+
         if c[index] < sync_success_limit:
-            PREPEND_TIME = 10/self.period # 10 second(s)
+            # If synchronization failure, use slower 'full' mode
+            c = np.correlate(self.signal, other.signal, mode='full')
+            # indexing for full differs from valid
+            time_offset += (len(other.time) - 1)*self.period
+            index = c.argmax()
 
-            start = self.time[0] - self.period
-            stop = start - PREPEND_TIME
-            n = -(stop - start)/self.period
-            npt.assert_almost_equal(n, np.round(n))
-            n = int(n)
-
-            c = np.correlate(np.concatenate((np.zeros((n,)), self.signal)),
-                             other.signal,
-                             mode='valid')
-
-            time_offset += self.time[0] - stop
-
-        index = c.argmax()
-        if c[index] < sync_success_limit:
-            raise ValueError(
-                    'Unable to synchronize signals {}, {}',
-                    self, other)
+            if c[index] < sync_success_limit:
+                raise ValueError(
+                        'Unable to synchronize signals {}, {}',
+                        self, other)
 
         return self.period*index - time_offset
