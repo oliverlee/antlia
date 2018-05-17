@@ -16,6 +16,8 @@ class EventType(Enum):
 
 EventClassificationData = namedtuple('EventClassificationData',
                                      ['v0', 'v1', 'vratio'])
+EventDetectionData = namedtuple('EventDetectionData',
+                                ['mask_a', 'mask_b'])
 
 class Trial2(Trial):
     def __init__(self, bicycle_data, lidar_data, period, lidar_bbmask=None):
@@ -50,9 +52,10 @@ class Trial2(Trial):
                     ylim=(0, 4))[0].count(axis=1)
         if bbmask_kw is not None:
             bbminus = self.lidar.cartesian(**bbmask_kw)[0].count(axis=1)
-            bbplus -= bbminus
+            mask_b = bbplus - bbminus > 1
+        else:
+            mask_b = bbplus > 1
 
-        mask_b = bbplus > 1
 
         # interpolate mask_b from lidar time to bicycle time
         mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
@@ -75,6 +78,8 @@ class Trial2(Trial):
 
         assert len(evti) > 0, "unable to detect event for this trial"
 
+        self.event_detection_data = EventDetectionData(
+                mask_a, mask_b)
         self.event_indices = evti[-1]
         self.event_timerange = (self.bicycle.time[self.event_indices[0]],
                                 self.bicycle.time[self.event_indices[1]])
