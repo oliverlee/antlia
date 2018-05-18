@@ -40,6 +40,37 @@ class Trial2(Trial):
 
             self._detect_event(bbmask_kw=lidar_bbmask)
 
+    @staticmethod
+    def mask_a(bicycle_data):
+        return bicycle_data.speed > 0.5
+
+    @staticmethod
+    def mask_b(lidar_data, bbmask_kw=None):
+        bbplus = lidar_data.cartesian(
+                    xlim=(-20, 60),
+                    ylim=(1.0, 3.5))[0].count(axis=1)
+
+        # subtract the obstacle
+        bbplus -= lidar_data.cartesian(
+                    xlim=(-5, -2),
+                    ylim=(2.90, 3.25))[0].count(axis=1)
+
+        if bbmask_kw is not None:
+            bbminus = lidar_data.cartesian(**bbmask_kw)[0].count(axis=1)
+            mask_b = bbplus - bbminus > 1
+        else:
+            mask_b = bbplus > 1
+        return mask_b
+
+    @staticmethod
+    def event_indices(mask):
+        edges = np.diff(mask.astype(int))
+        rising = np.where(edges > 0)[0]
+        falling = np.where(edges < 0)[0]
+
+        assert len(rising) == len(falling)
+        return list(zip(rising, falling))
+
     def _detect_event(self, bbmask_kw=None):
         """Event is detected using two masks, one on the bicycle speed sensor
         and one on the lidar data. Mask A detects when the bicycle speed is
@@ -57,35 +88,14 @@ class Trial2(Trial):
                    ignore for event detection. This is used in the event of
                    erroneous lidar data.
         """
-        mask_a = self.bicycle.speed > 0.5
-
-        bbplus = self.lidar.cartesian(
-                    xlim=(-20, 60),
-                    ylim=(1.0, 3.5))[0].count(axis=1)
-
-        # subtract the obstacle
-        bbplus -= self.lidar.cartesian(
-                    xlim=(-5, -2),
-                    ylim=(2.90, 3.25))[0].count(axis=1)
-
-        if bbmask_kw is not None:
-            bbminus = self.lidar.cartesian(**bbmask_kw)[0].count(axis=1)
-            mask_b = bbplus - bbminus > 1
-        else:
-            mask_b = bbplus > 1
-
+        mask_a = Trial2.mask_a(self.bicycle)
+        mask_b = Trial2.mask_b(self.lidar, bbmask_kw)
 
         # interpolate mask_b from lidar time to bicycle time
         mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
 
-        events = util.debounce(np.logical_and(mask_a, mask_b))
-
-        edges = np.diff(events.astype(int))
-        rising = np.where(edges > 0)[0]
-        falling = np.where(edges < 0)[0]
-        assert len(rising) == len(falling)
-
-        evti = list(zip(rising, falling))
+        mask_ab = util.debounce(np.logical_and(mask_a, mask_b))
+        evti = Trial2.event_indices(mask_ab)
 
         # filter out events with a minimum size and minimum average speed
         MIN_TIME_DURATION = int(5.5 * 125) # in samples
