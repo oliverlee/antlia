@@ -27,6 +27,22 @@ class Event(Trial):
             self.bicycle = self.data
             self.type = event_type
 
+ENTRY_BB = {
+    'xlim': (20, 50),
+    'ylim': (2, 3.5)
+}
+EXIT_BB = {
+    'xlim': (-20, -10),
+    'ylim': (2, 3.5)
+}
+OBSTACLE_BB = {
+    'xlim': (-5, -2),
+    'ylim': (2.90, 3.25)
+}
+VALID_BB = {
+    'xlim': (-20, 60),
+    'ylim': (1.0, 3.5)
+}
 
 class Trial2(Trial):
     def __init__(self, bicycle_data, lidar_data, period, lidar_bbmask=None):
@@ -46,14 +62,10 @@ class Trial2(Trial):
 
     @staticmethod
     def mask_b(lidar_data, bbmask_kw=None):
-        bbplus = lidar_data.cartesian(
-                    xlim=(-20, 60),
-                    ylim=(1.0, 3.5))[0].count(axis=1)
+        bbplus = lidar_data.cartesian(**VALID_BB)[0].count(axis=1)
 
         # subtract the obstacle
-        bbplus -= lidar_data.cartesian(
-                    xlim=(-5, -2),
-                    ylim=(2.90, 3.25))[0].count(axis=1)
+        bbplus -= lidar_data.cartesian(**OBSTACLE_BB)[0].count(axis=1)
 
         if bbmask_kw is not None:
             bbminus = lidar_data.cartesian(**bbmask_kw)[0].count(axis=1)
@@ -108,12 +120,8 @@ class Trial2(Trial):
         evt_index = evti[-1]
 
         # reduce region using entry and exit bounding box detection
-        entry_mask = self.lidar.cartesian(
-                        xlim=(20, 50),
-                        ylim=(2, 3.5))[0].count(axis=1) > 1
-        exit_mask = self.lidar.cartesian(
-                        xlim=(-20, -10),
-                        ylim=(2, 3.5))[0].count(axis=1) > 1
+        entry_mask = self.lidar.cartesian(**ENTRY_BB)[0].count(axis=1) > 1
+        exit_mask = self.lidar.cartesian(**EXIT_BB)[0].count(axis=1) > 1
 
         # find time where cyclist enters lidar vision
         entry_time = None
