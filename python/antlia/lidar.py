@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
+import hdbscan
 import numpy as np
-
 import matplotlib.pyplot as plt
 import matplotlib.animation
 
@@ -49,6 +49,22 @@ class LidarRecord(np.recarray):
             index = index | (rho < rmin) | (rho > rmax)
         return (np.ma.masked_array(x, index),
                 np.ma.masked_array(y, index))
+
+    def object_count(self, xlim=None, ylim=None, rlim=None):
+        x, y = self.cartesian(xlim, ylim, rlim)
+
+        count = np.zeros((x.shape[0],))
+        for i in range(x.shape[0]):
+            X = np.vstack((
+                    x[i].compressed(),
+                    y[i].compressed())).transpose()
+            hdb = hdbscan.HDBSCAN(
+                    min_cluster_size=10,
+                    min_samples=10,
+                    allow_single_cluster=True,
+                    metric='euclidean').fit(X)
+            count[i] = max(hdb.labels_)
+        return count
 
     def animate(self, xlim=None, ylim=None, rlim=None,
                 speedup=1, color=None, plot_kwargs={}, **kwargs):
