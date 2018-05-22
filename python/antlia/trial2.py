@@ -129,7 +129,7 @@ class Event(Trial):
         self.stationary_mask = stationary_mask
         self.stationary_count = stationary_count
 
-    def plot_clusters(self, color_func=None, ax=None, **fig_kw):
+    def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
             fig, ax = plt.subplots(subplot_kw={'projection': '3d'}, **fig_kw)
         else:
@@ -142,8 +142,12 @@ class Event(Trial):
                 s=0.5)
 
         for cluster in self.clusters:
-            if color_func is not None:
-                color = color_func(cluster)
+            X = self.valid_points[cluster.index]
+
+            if plot_cluster_func is not None:
+                plot_kw = plot_cluster_func(cluster)
+                plot_kw.setdefault('marker', '.')
+                ax.scatter(X[:, 0], X[:, 1], X[:, 2], **plot_kw)
             else:
                 if cluster.label == -1:
                     color = noise_color
@@ -154,10 +158,9 @@ class Event(Trial):
                     else:
                         color = colors.pop()
                     alpha = 1
+                ax.scatter(X[:, 0], X[:, 1], X[:, 2],
+                           marker='.', color=color, alpha=alpha)
 
-            X = self.valid_points[cluster.index]
-            ax.scatter(X[:, 0], X[:, 1], X[:, 2],
-                       marker='.', color=color, alpha=alpha)
 
         return fig, ax
 
