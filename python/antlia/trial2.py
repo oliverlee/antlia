@@ -4,6 +4,10 @@ from collections import namedtuple
 import warnings
 
 import numpy as np
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.axes3d import Axes3D
+import seaborn as sns
+import hdbscan
 
 from antlia.trial import Trial
 import antlia.util as util
@@ -19,13 +23,9 @@ EventDetectionData = namedtuple(
         'EventDetectionData',
         ['mask_a', 'mask_b', 'mask_event', 'entry_time', 'exit_time'])
 
-
-class Event(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, event_type):
-            super().__init__(bicycle_data, period)
-            self.lidar = lidar_data
-            self.bicycle = self.data
-            self.type = event_type
+ClusterData = namedtuple(
+        'ClusterData',
+        ['label', 'index', 'zmean', 'zspan', 'stationary'])
 
 ENTRY_BB = {
     'xlim': (20, 50),
@@ -44,6 +44,114 @@ VALID_BB = {
     'ylim': (1.0, 3.5)
 }
 
+
+class Event(Trial):
+    def __init__(self, bicycle_data, lidar_data, period, event_type):
+            super().__init__(bicycle_data, period)
+            self.lidar = lidar_data
+            self.bicycle = self.data
+            self.type = event_type
+
+            self.x = None
+            self.y = None
+            self.z = None
+            self.valid_points = None
+            self.hdb = None
+            self.clusters = None
+            self.bb_mask = None
+            self.stationary_mask = None
+            self.stationary_count = None
+            self._identify_stationary()
+
+    def _identify_stationary(self, min_zspan=0.5, zscale=0.001, hdbscan_kw=None):
+        x, y, z = self.lidar.cartesianz(**VALID_BB)
+        bb_mask = x.mask
+
+        # rescale z
+        assert z.shape[0] > 1
+        z.mask = False
+        z -= z[0, 0]
+        z *= zscale/(z[1, 0] - z[0, 0])
+        z.mask = bb_mask
+
+        # create point cloud data
+        X = np.vstack((
+            x.compressed(),
+            y.compressed(),
+            z.compressed())).transpose()
+
+        if hdbscan_kw is None:
+            hdbscan_kw = {}
+
+        hdbscan_kw['allow_single_cluster'] = False
+        hdbscan_kw.setdefault('min_cluster_size', 10)
+        hdbscan_kw.setdefault('metric', 'euclidean')
+
+        # cluster
+        hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
+        cluster_labels = list(set(hdb.labels_))
+
+        # determine cluster data and stationarity
+        stationary_mask = np.ma.zeros(bb_mask.shape, dtype=bool)
+        cluster_data = []
+        stationary_count = 0
+        for label in cluster_labels:
+            index = hdb.labels_ == label
+
+            zmean = X[index, 2].mean()
+            zspan = len(set(X[index, 2]))
+
+            # (non-noise) clusters with large zspan
+            stationary = label != -1 and zspan > min_zspan*z.shape[0]
+
+            cluster_data.append(ClusterData(
+                label, index, zmean, zspan, stationary))
+
+            if stationary:
+                stationary_count += 1
+                stationary_mask[~bb_mask][index] = True
+                print('marking cluster {} as stationary'.format(label))
+
+        self.x = x
+        self.y = y
+        self.z = z
+        self.valid_points = X
+        self.hdb = hdb
+        self.clusters = cluster_data
+        self.bb_mask = bb_mask
+        self.stationary_mask = stationary_mask
+        self.stationary_count = stationary_count
+
+    def plot_clusters(self, color_func=None, ax=None, **fig_kw):
+        if ax is None:
+            fig, ax = plt.subplots(subplot_kw={'projection': '3d'}, **fig_kw)
+        else:
+            fig = ax.get_figure()
+
+        noise_color = 'dimgray'
+        stationary_colors = sns.husl_palette(self.stationary_count, l=0.3)
+        colors = sns.husl_palette(
+                len(self.clusters) - self.stationary_count - 1,
+                s=0.5)
+
+        for cluster in self.clusters:
+            if cluster.label == -1:
+                color = noise_color
+                alpha = 0.5
+            else:
+                if cluster.stationary:
+                    color = stationary_colors.pop()
+                else:
+                    color = colors.pop()
+                alpha = 1
+
+            X = self.valid_points[cluster.index]
+            ax.scatter(X[:, 0], X[:, 1], X[:, 2],
+                       marker='.', color=color, alpha=alpha)
+
+        return fig, ax
+
+
 class Trial2(Trial):
     def __init__(self, bicycle_data, lidar_data, period, lidar_bbmask=None):
             super().__init__(bicycle_data, period)
@@ -53,7 +161,6 @@ class Trial2(Trial):
             self.event_indices = None
             self.event_detection = None
             self.event = None
-
             self._detect_event(bbmask_kw=lidar_bbmask)
 
     @staticmethod
