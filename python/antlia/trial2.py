@@ -4,11 +4,13 @@ from collections import namedtuple
 import warnings
 
 import numpy as np
+import scipy.signal
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
 import hdbscan
 
+import antlia.filter as ff
 from antlia.trial import Trial
 import antlia.util as util
 
@@ -92,7 +94,10 @@ class Event(Trial):
         cluster_labels = list(set(hdb.labels_))
 
         # determine cluster data and stationarity
-        stationary_mask = np.ma.zeros(bb_mask.shape, dtype=bool)
+        bb_mask_shape = bb_mask.shape
+        bb_mask = bb_mask.reshape(-1)
+        not_bb_mask_index = np.where(~bb_mask)[0]
+        stationary_mask = np.zeros(bb_mask.shape, dtype=bool)
         cluster_data = []
         stationary_count = 0
         for label in cluster_labels:
@@ -109,8 +114,10 @@ class Event(Trial):
 
             if stationary:
                 stationary_count += 1
-                stationary_mask[~bb_mask][index] = True
-                print('marking cluster {} as stationary'.format(label))
+                stationary_mask[not_bb_mask_index[index]] = True
+
+        bb_mask = bb_mask.reshape(bb_mask_shape)
+        stationary_mask = stationary_mask.reshape(bb_mask_shape)
 
         self.x = x
         self.y = y
@@ -135,21 +142,90 @@ class Event(Trial):
                 s=0.5)
 
         for cluster in self.clusters:
-            if cluster.label == -1:
-                color = noise_color
-                alpha = 0.5
+            if color_func is not None:
+                color = color_func(cluster)
             else:
-                if cluster.stationary:
-                    color = stationary_colors.pop()
+                if cluster.label == -1:
+                    color = noise_color
+                    alpha = 0.2
                 else:
-                    color = colors.pop()
-                alpha = 1
+                    if cluster.stationary:
+                        color = stationary_colors.pop()
+                    else:
+                        color = colors.pop()
+                    alpha = 1
 
             X = self.valid_points[cluster.index]
             ax.scatter(X[:, 0], X[:, 1], X[:, 2],
                        marker='.', color=color, alpha=alpha)
 
         return fig, ax
+
+    def plot_trajectory(self, ax=None, **fig_kw):
+        if ax is None:
+            fig, ax = plt.subplots(2, 1, sharex=False, **fig_kw)
+        else:
+            assert len(ax) == 2
+            fig = ax[0].get_figure()
+
+        colors = sns.color_palette('Paired', 12)
+
+        # stationary points
+        ax[0].scatter(self.x.data[self.stationary_mask & ~self.bb_mask],
+                      self.y.data[self.stationary_mask & ~self.bb_mask],
+                      s=5, marker='x', color='black',
+                      label='stationary points')
+
+        x = self.x.copy()
+        y = self.y.copy()
+        x.mask = self.stationary_mask | self.bb_mask
+        y.mask = self.stationary_mask | self.bb_mask
+
+        # non-stationary points
+        ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
+                      label='non-stationary points')
+
+        # trajectory points
+        xm = x.mean(axis=1)
+        ym = y.mean(axis=1)
+        ax[0].scatter(xm, ym, s=5, edgecolor=colors[5],
+                      label='NSP centroid (per frame)')
+
+        # interpolated trajectory
+        xm[xm.mask] = np.interp(
+                np.where(xm.mask)[0], np.where(~xm.mask)[0], xm[~xm.mask])
+        ym[ym.mask] = np.interp(
+                np.where(ym.mask)[0], np.where(~ym.mask)[0], ym[~ym.mask])
+        ax[0].plot(xm, ym, color=colors[4],
+                   label='NSP centroid (interpolated)')
+
+        # filtered trajectory
+        order = 4
+        fc = 1.5
+        fs = 20
+        wn = fc / (0.5*fs)
+        b, a = scipy.signal.butter(order, wn, btype='lowpass')
+        butterf = lambda x: scipy.signal.filtfilt(b, a, x)
+        ax[0].plot(butterf(xm), butterf(ym), color=colors[3],
+                   label='NSP centroid (filtered, low pass butterworth)')
+
+        ax[0].legend()
+
+        f = lambda x: np.square(np.diff(x))
+        v = lambda x, y: np.sqrt(f(x) + f(y)) / 0.05
+        ax[1].plot(self.bicycle.time,
+                   self.bicycle.speed,
+                   color=colors[0])
+        ax[1].plot(self.bicycle.time,
+                   ff.moving_average(self.bicycle.speed, 55),
+                   color=colors[1])
+        ax[1].plot(self.lidar.time[1:], v(xm, ym),
+                   color=colors[4])
+        ax[1].plot(self.lidar.time[1:], v(butterf(xm), butterf(ym)),
+                   color=colors[3])
+
+        return fig, ax
+
 
 
 class Trial2(Trial):
