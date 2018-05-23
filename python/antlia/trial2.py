@@ -213,20 +213,36 @@ class Event(Trial):
         ax[0].plot(butterf(xm), butterf(ym), color=colors[3],
                    label='NSP centroid (filtered, low pass butterworth)')
 
-        ax[0].legend()
+        handles, labels = ax[0].get_legend_handles_labels()
+        # move first 2 elements to end
+        handles = handles[2:] + handles[:2]
+        lables = labels[2:] + labels[:2]
+        ax[0].legend(handles, labels)
 
         f = lambda x: np.square(np.diff(x))
         v = lambda x, y: np.sqrt(f(x) + f(y)) / 0.05
         ax[1].plot(self.bicycle.time,
-                   self.bicycle.speed,
-                   color=colors[0])
-        ax[1].plot(self.bicycle.time,
                    ff.moving_average(self.bicycle.speed, 55),
-                   color=colors[1])
+                   color=colors[1], zorder=2,
+                   label='measured speed (filtered, moving average)')
+        ylim = ax[1].get_ylim()
+        ax[1].plot(self.bicycle.time,
+                   self.bicycle.speed,
+                   color=colors[0], zorder=0,
+                   label='measured speed')
         ax[1].plot(self.lidar.time[1:], v(xm, ym),
-                   color=colors[4])
+                   color=colors[4], zorder=1,
+                   label='estimated speed (centroid)')
         ax[1].plot(self.lidar.time[1:], v(butterf(xm), butterf(ym)),
-                   color=colors[3])
+                   color=colors[3], zorder=2,
+                   label='estimated speed (centroid, filtered, low pass butter)')
+        ax[1].set_ylim(ylim)
+
+        handles, labels = ax[1].get_legend_handles_labels()
+        # swap first two elements
+        handles[0], handles[1] = handles[1], handles[0]
+        labels[0], labels[1] = labels[1], labels[0]
+        ax[1].legend(handles, labels)
 
         return fig, ax
 
