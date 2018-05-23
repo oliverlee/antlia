@@ -30,16 +30,16 @@ ClusterData = namedtuple(
         ['label', 'index', 'zmean', 'zspan', 'stationary'])
 
 ENTRY_BB = {
-    'xlim': (20, 50),
-    'ylim': (2, 3.5)
+    'xlim': (20, 30),
+    'ylim': (2.5, 3.5)
 }
 EXIT_BB = {
     'xlim': (-20, -10),
-    'ylim': (2, 3.5)
+    'ylim': (2.5, 3.5)
 }
 OBSTACLE_BB = {
     'xlim': (-5, -2),
-    'ylim': (2.90, 3.25)
+    'ylim': (2.70, 3.25)
 }
 VALID_BB = {
     'xlim': (-20, 60),
@@ -368,9 +368,11 @@ class Trial2(Trial):
             warnings.warn(msg, UserWarning)
 
         # find time where cyclist has finished overtaking obstacle, if it exists
+        # using the falling edge of the first clump
         exit_time = None
-        for x in np.where(exit_mask > 0)[0][::-1]:
-            t = self.lidar.time[x]
+        exit_clumps = np.ma.extras._ezclump(exit_mask > 0)
+        for clump in exit_clumps:
+            t = self.lidar.time[clump.stop]
             if (t >= self.bicycle.time[evt_index[0]] and
                 t < self.bicycle.time[evt_index[1]]):
                 exit_time = t
