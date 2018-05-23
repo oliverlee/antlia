@@ -264,11 +264,18 @@ def plot_histograms(stats, **kwargs):
 
 
 def plot_bivariates(stats):
-    colors = sns.husl_palette(stats['rider id'].max() + 1, l=.7)
+    current_palette = sns.utils.get_color_cycle()
+    n_colors = stats['rider id'].max() + 1
+
+    if n_colors <= len(current_palette):
+        colors = sns.color_palette(n_colors=n_colors)
+    else:
+        colors = sns.husl_palette(n_colors, l=.7)
+
     riders = np.unique(stats['rider id'])
     proxy_lines = []
     for rid in riders:
-        c = colors[rid - 1]
+        c = colors[rid]
         l = matplotlib.lines.Line2D([], [],
                 linestyle='', marker='o', markerfacecolor=c,
                 label='rider {}'.format(rid))
