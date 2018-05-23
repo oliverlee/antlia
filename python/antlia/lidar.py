@@ -50,6 +50,18 @@ class LidarRecord(np.recarray):
         return (np.ma.masked_array(x, index),
                 np.ma.masked_array(y, index))
 
+    def cartesianz(self, xlim=None, ylim=None, rlim=None):
+        """Return lidar data in cartesian coordinates in addition to a time
+        vector with equal shape and mask as x and y.
+        """
+        x, y = self.cartesian(xlim=xlim, ylim=ylim, rlim=rlim)
+        z = np.ma.array(np.matlib.repmat(
+                self.time.reshape((-1, 1)),
+                1,
+                x.shape[1]))
+        z.mask = x.mask
+        return x, y, z
+
     def object_count(self, xlim=None, ylim=None, rlim=None):
         x, y = self.cartesian(xlim, ylim, rlim)
 
