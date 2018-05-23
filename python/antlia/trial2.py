@@ -48,11 +48,13 @@ VALID_BB = {
 
 
 class Event(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, event_type):
+    def __init__(self, bicycle_data, lidar_data, period, event_type,
+                 invalid_bb=None):
             super().__init__(bicycle_data, period)
             self.lidar = lidar_data
             self.bicycle = self.data
             self.type = event_type
+            self.invalid_bb = invalid_bb
 
             self.x = None
             self.y = None
@@ -63,10 +65,25 @@ class Event(Trial):
             self.bb_mask = None
             self.stationary_mask = None
             self.stationary_count = None
-            self._identify_stationary()
+            self._identify_stationary(invalid_bb=invalid_bb)
 
-    def _identify_stationary(self, min_zspan=0.5, zscale=0.0005, hdbscan_kw=None):
+    def _identify_stationary(self, min_zspan=0.5, zscale=0.0005,
+                             hdbscan_kw=None, invalid_bb=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
+
+        # exclusive bbmask
+        if invalid_bb is not None:
+            if not hasattr(invalid_bb, '__iter__'):
+                invalid_bb = [invalid_bb]
+
+            for m in invalid_bb:
+                if 'xlim' in m and 'ylim' in m:
+                    xmin, xmax = m['xlim']
+                    ymin, ymax = m['ylim']
+                    x.mask |= (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax)
+                    y.mask = x.mask
+
+            z.mask = x.mask
         bb_mask = x.mask
 
         # rescale z
@@ -249,7 +266,7 @@ class Event(Trial):
 
 
 class Trial2(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, lidar_bbmask=None):
+    def __init__(self, bicycle_data, lidar_data, period, invalid_bb=None):
             super().__init__(bicycle_data, period)
             self.lidar = lidar_data
             self.bicycle = self.data
@@ -257,25 +274,28 @@ class Trial2(Trial):
             self.event_indices = None
             self.event_detection = None
             self.event = None
-            self._detect_event(bbmask_kw=lidar_bbmask)
+            self._detect_event(invalid_bb=invalid_bb)
 
     @staticmethod
     def mask_a(bicycle_data):
         return bicycle_data.speed > 0.5
 
     @staticmethod
-    def mask_b(lidar_data, bbmask_kw=None):
+    def mask_b(lidar_data, invalid_bb=None):
         bbplus = lidar_data.cartesian(**VALID_BB)[0].count(axis=1)
 
         # subtract the obstacle
         bbplus -= lidar_data.cartesian(**OBSTACLE_BB)[0].count(axis=1)
 
-        if bbmask_kw is not None:
-            bbminus = lidar_data.cartesian(**bbmask_kw)[0].count(axis=1)
-            mask_b = bbplus - bbminus > 1
-        else:
-            mask_b = bbplus > 1
-        return mask_b
+        mask = bbplus
+        if invalid_bb is not None:
+            if not hasattr(invalid_bb, '__iter__'):
+                invalid_bb = [invalid_bb]
+
+            for m in invalid_bb:
+                bbminus = lidar_data.cartesian(**m)[0].count(axis=1)
+                mask -= bbminus
+        return mask > 1
 
     @staticmethod
     def event_indices(mask):
@@ -286,7 +306,7 @@ class Trial2(Trial):
         assert len(rising) == len(falling)
         return list(zip(rising, falling))
 
-    def _detect_event(self, bbmask_kw=None):
+    def _detect_event(self, invalid_bb=None):
         """Event is detected using two masks, one on the bicycle speed sensor
         and one on the lidar data. Mask A detects when the bicycle speed is
         greater than 0.5. Mask B detects if any object is visible to the lidar,
@@ -299,12 +319,12 @@ class Trial2(Trial):
         overtaking) and in the bounding box (-20, 2), (-10, 3.5).
 
         Parameters:
-        bbmask_kw: dict, keywords supplied to lidar.cartesian() for an area to
-                   ignore for event detection. This is used in the event of
-                   erroneous lidar data.
+        invalid_bb: dict or iteratble of dicts, keywords supplied to
+                    lidar.cartesian() for an area to ignore for event detection.
+                    This is used in the event of erroneous lidar data.
         """
         mask_a = Trial2.mask_a(self.bicycle)
-        mask_b = Trial2.mask_b(self.lidar, bbmask_kw)
+        mask_b = Trial2.mask_b(self.lidar, invalid_bb)
 
         # interpolate mask_b from lidar time to bicycle time
         mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
@@ -388,4 +408,5 @@ class Trial2(Trial):
                 self.bicycle[evt_index[0]:evt_index[1]],
                 self.lidar.frame(lambda t: (t >= t0) & (t < t1)),
                 self.period,
-                event_type)
+                event_type,
+                invalid_bb=invalid_bb)
