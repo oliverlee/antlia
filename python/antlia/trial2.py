@@ -65,7 +65,7 @@ class Event(Trial):
             self.stationary_count = None
             self._identify_stationary()
 
-    def _identify_stationary(self, min_zspan=0.5, zscale=0.001, hdbscan_kw=None):
+    def _identify_stationary(self, min_zspan=0.5, zscale=0.0005, hdbscan_kw=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
         bb_mask = x.mask
 
@@ -86,7 +86,8 @@ class Event(Trial):
             hdbscan_kw = {}
 
         hdbscan_kw['allow_single_cluster'] = False
-        hdbscan_kw.setdefault('min_cluster_size', 10)
+        hdbscan_kw.setdefault('min_cluster_size', 30)
+        hdbscan_kw.setdefault('min_samples', 15)
         hdbscan_kw.setdefault('metric', 'euclidean')
 
         # cluster
