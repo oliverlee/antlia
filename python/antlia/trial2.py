@@ -10,16 +10,10 @@ from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
 import hdbscan
 
+from antlia import dtc
 import antlia.filter as ff
 from antlia.trial import Trial
 import antlia.util as util
-
-class EventType(Enum):
-    Braking = 0
-    Overtaking = 1
-
-    def __str__(self):
-        return self.name
 
 EventDetectionData = namedtuple(
         'EventDetectionData',
@@ -45,6 +39,14 @@ VALID_BB = {
     'xlim': (-20, 60),
     'ylim': (1.0, 3.5)
 }
+
+
+class EventType(Enum):
+    Braking = 0
+    Overtaking = 1
+
+    def __str__(self):
+        return self.name
 
 
 class Event(Trial):
@@ -80,18 +82,27 @@ class Event(Trial):
                 if 'xlim' in m and 'ylim' in m:
                     xmin, xmax = m['xlim']
                     ymin, ymax = m['ylim']
-                    x.mask |= (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax)
-                    y.mask = x.mask
+                    index = (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax)
+                    x[index] = ma.masked
 
-            z.mask = x.mask
-        bb_mask = x.mask
+        # use the same mask for x and y
+        y.mask = x.mask
 
-        # rescale z
+        # rescale z and then use the same mask as x and y
         assert z.shape[0] > 1
         z.mask = False
         z -= z[0, 0]
         z *= zscale/(z[1, 0] - z[0, 0])
-        z.mask = bb_mask
+        z.mask = x.mask
+
+        # make sure (at least) some entries in x, y, z are masked so we don't
+        # perform clustering on all the points at the lidar boundary
+        assert np.any(x.mask)
+        assert np.any(y.mask)
+        assert np.any(z.mask)
+
+        # copy x.mask so we aren't referencing the same data
+        bb_mask = np.ma.getmaskarray(x).copy()
 
         # create point cloud data
         X = np.vstack((
@@ -112,7 +123,6 @@ class Event(Trial):
         cluster_labels = list(set(hdb.labels_))
 
         # determine cluster data and stationarity
-        bb_mask_shape = bb_mask.shape
         bb_mask = bb_mask.reshape(-1)
         not_bb_mask_index = np.where(~bb_mask)[0]
         stationary_mask = np.zeros(bb_mask.shape, dtype=bool)
@@ -134,8 +144,8 @@ class Event(Trial):
                 stationary_count += 1
                 stationary_mask[not_bb_mask_index[index]] = True
 
-        bb_mask = bb_mask.reshape(bb_mask_shape)
-        stationary_mask = stationary_mask.reshape(bb_mask_shape)
+        bb_mask = bb_mask.reshape(x.mask.shape)
+        stationary_mask = stationary_mask.reshape(x.mask.shape)
 
         self.x = x
         self.y = y
@@ -146,6 +156,184 @@ class Event(Trial):
         self.bb_mask = bb_mask
         self.stationary_mask = stationary_mask
         self.stationary_count = stationary_count
+
+    @staticmethod
+    def _set_obstacle_mask(X):
+        """Sets the mask of X to exclude stationary noise.
+
+        Parameters:
+        X: masked array with shape (n, 2)
+        """
+        if len(X.shape) != 2:
+            raise TypeError('X.shape must be (n, 2)')
+        if X.shape[1] != 2:
+            raise TypeError('X.shape must be (n, 2)')
+
+        X.mask = np.ma.nomask
+
+        hdbscan_kw = {}
+        hdbscan_kw['allow_single_cluster'] = True
+        hdbscan_kw['min_cluster_size'] = 30
+        hdbscan_kw['min_samples'] = 15
+        hdbscan_kw['metric'] = 'euclidean'
+
+        # try clustering to find obstacle
+        try:
+            hdb, labels = Event.__get_single_cluster(X, hdbscan_kw)
+        except ValueError:
+            hdbscan_kw['min_cluster_size'] = hdbscan_kw['min_cluster_size']//2
+            hdbscan_kw['min_samples'] = hdbscan_kw['min_samples']*2//3
+            hdb, labels = Event.__get_single_cluster(X, hdbscan_kw)
+
+        if max(labels) != 0:
+            msg = 'Found more than one cluster. Change cluster parameters.'
+            raise ValueError(msg)
+        if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
+            msg = 'More than 10% of points are classified as noise.'
+            msg += ' Change cluster parameters.'
+            raise ValueError(msg)
+
+        X[hdb.labels_ != 0] = np.ma.masked
+
+    def _calculate_dtc(self, lidar_index):
+        """Calculate the distance between the bicycle and obstacle at lidar
+        index. Returns the calculated distance, bicycle points, and stationary
+        points.
+        """
+        # bicycle
+        bicycle_mask = self.bb_mask | self.stationary_mask
+        x = np.ma.masked_where(bicycle_mask, self.x, copy=True)
+        y = np.ma.masked_where(bicycle_mask, self.y, copy=True)
+        X = np.vstack((
+                x[lidar_index].compressed(),
+                y[lidar_index].compressed())).T
+
+        # stationary
+        stationary_mask = self.bb_mask | ~self.stationary_mask
+        x = np.ma.masked_where(stationary_mask, self.x, copy=True)
+        y = np.ma.masked_where(stationary_mask, self.y, copy=True)
+        Y = np.ma.masked_array(np.vstack((
+                x[lidar_index].compressed(),
+                y[lidar_index].compressed())).T)
+
+        # exclude stationary noise
+        self._set_obstacle_mask(Y)
+
+        # get closest pair and perform distance calculation
+        pair = dtc.bcp(X, Y)
+        dist = dtc.dist(*pair)
+        return dist, pair, X, Y
+
+    def _plot_closest_pair(self, lidar_index, ax=None, **fig_kw):
+        if ax is None:
+            fig, ax = plt.subplots(**fig_kw)
+        else:
+            fig = ax.get_figure()
+
+        _, pair, X, Y = self._calculate_dtc(lidar_index)
+
+        colors = sns.color_palette('Paired', 10)
+        dtc.plot_closest_pair(X, Y, pair=pair, ax=ax, color=colors[1::2])
+
+        # plot stationary noise
+        Y.mask = ~Y.mask
+        ax.scatter(*Y.T, color=colors[2])
+
+        return fig, ax
+
+    def calculate_dtc(self, timestamp):
+        """Return the distance between the bicycle and obstacle at timestamp.
+        """
+        assert timestamp >= self.bicycle.time[0]
+        assert timestamp <= self.bicycle.time[-1]
+        assert timestamp >= self.lidar.time[0]
+        assert timestamp <= self.lidar.time[-1]
+
+        i = self.lidar.frame_index(timestamp)
+        assert i > 0
+
+        times = []
+        distances = []
+        for j in [i - 1, i]:
+            times.append(self.lidar.time[j][0])
+            distances.append(self._calculate_dtc(j)[0])
+
+        return np.interp(timestamp, times, distances)
+
+    @staticmethod
+    def __get_single_cluster(X, hdbscan_kw):
+        hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
+        labels = list(set(hdb.labels_))
+
+        if max(labels) != 0:
+            msg = 'Found more than one cluster. Change cluster parameters.'
+            raise ValueError(msg)
+        if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
+            msg = 'More than 10% of points are classified as noise.'
+            msg += ' Change cluster parameters.'
+            raise ValueError(msg)
+
+        return hdb, labels
+
+    def _plot_stationary_clusters(self, lidar_index,
+                                  hdbscan_kw=None, ax=None, **fig_kw):
+        """Plot stationary clusters for a single lidar frame. """
+        # stationary
+        stationary_mask = self.bb_mask | ~self.stationary_mask
+        x = np.ma.masked_where(stationary_mask, self.x, copy=True)
+        y = np.ma.masked_where(stationary_mask, self.y, copy=True)
+        X = np.ma.masked_array(np.vstack((
+                x[lidar_index].compressed(),
+                y[lidar_index].compressed())).T)
+
+        if hdbscan_kw is None:
+            hdbscan_kw = {}
+
+        hdbscan_kw['allow_single_cluster'] = True
+        hdbscan_kw.setdefault('min_cluster_size', 30)
+        hdbscan_kw.setdefault('min_samples', 15)
+        hdbscan_kw.setdefault('metric', 'euclidean')
+
+        # try clustering to find obstacle
+        try:
+            hdb, labels = self.__get_single_cluster(X, hdbscan_kw)
+        except ValueError:
+            hdbscan_kw['min_cluster_size'] = hdbscan_kw['min_cluster_size']//2
+            hdbscan_kw['min_samples'] = hdbscan_kw['min_samples']*2//3
+            hdb, labels = self.__get_single_cluster(X, hdbscan_kw)
+
+        if max(labels) != 0:
+            msg = 'Found more than one cluster. Change cluster parameters.'
+            warnings.warn(msg, UserWarning)
+        if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
+            msg = 'More than 10% of points are classified as noise.'
+            msg += ' Change cluster parameters.'
+            warnings.warn(msg, UserWarning)
+
+        noise_color = 'dimgray'
+        n_colors = len(labels) - 1
+        if n_colors <= 10:
+            colors = sns.color_palette('tab10', 10)
+        else:
+            colors = sns.husl_palette(n_colors, l=0.7)
+
+        if ax is None:
+            fig, ax = plt.subplots(**fig_kw)
+        else:
+            fig = ax.get_figure()
+
+        for i in labels:
+            index = hdb.labels_ == i
+            if i == -1:
+                color = noise_color
+                label = 'stationary noise'
+            else:
+                color = colors[i]
+                label = 'obstacle'
+            ax.scatter(*X[index].T, color=color, label=label)
+        ax.legend()
+
+        return fig, ax
 
     def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
@@ -264,7 +452,6 @@ class Event(Trial):
         return fig, ax
 
 
-
 class Trial2(Trial):
     def __init__(self, bicycle_data, lidar_data, period, invalid_bb=None):
             super().__init__(bicycle_data, period)
@@ -292,9 +479,8 @@ class Trial2(Trial):
             if not hasattr(invalid_bb, '__iter__'):
                 invalid_bb = [invalid_bb]
 
-            for m in invalid_bb:
-                bbminus = lidar_data.cartesian(**m)[0].count(axis=1)
-                mask -= bbminus
+            for bbminus in invalid_bb:
+                mask -= lidar_data.cartesian(**bbminus)[0].count(axis=1)
         return mask > 1
 
     @staticmethod

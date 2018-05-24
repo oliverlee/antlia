@@ -323,7 +323,6 @@ class Record(object):
             warnings.warn(msg, UserWarning)
         self.trials = trials
 
-
     def _calculate_trial_ranges(self, trial_number):
         """In a trial, we normally observe 3 phases. We describe each phase as:
         1. Subject moves from the LIDAR/obstacle to path start
