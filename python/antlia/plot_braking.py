@@ -33,35 +33,37 @@ yfields = [('starting velocity', 'm/s'),
 
 
 def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
-    indices = np.where(accel > threshold)[0]
-    ranges = util.get_contiguous_numbers(indices)
+    min_merge_accel = -0.15
+    range_clumps = np.ma.extras._ezclump(accel > threshold)
 
-    # exclude ranges smaller than min_size
-    ranges = [(r0, r1) for (r0, r1) in ranges if (r1 - r0) > min_size]
-
-    # merge ranges that are separated by min_size if acceleration sign does not
-    # change
-    merged = []
-    while ranges:
-        if len(ranges) == 1:
-            merged.append(ranges.pop(0))
+    merged_clumps = []
+    while range_clumps:
+        if len(range_clumps) == 1:
+            merged_clumps.append(range_clumps.pop())
         else:
-            ra = ranges.pop(0)
-            rb = ranges[0]
-            if (((rb[0] - ra[1]) < min_size) and
-                np.all(np.sign(accel[ra[1]:rb[0]]) == 1)):
-                ranges[0] = (ra[0], rb[1])
+            clump1 = range_clumps.pop(0)
+            clump2 = range_clumps[0]
+            if (((clump2.start - clump1.stop) < min_size) and
+                np.all(accel[clump1.stop:clump2.start] > min_merge_accel)):
+                range_clumps[0] = slice(clump1.start, clump2.stop)
             else:
-                merged.append(ra)
+                merged_clumps.append(clump1)
+    merged_clumps = [(clump.start, clump.stop - 1) for clump in merged_clumps
+                     if clump.stop - clump.start > min_size]
+    if not merged_clumps:
+        msg = 'Braking not detected. Use different parameters to specify '
+        msg += 'braking conditions.'
+        raise ValueError(msg)
 
     # find the 'largest' range by simplified integration
     largest = None
-    for r0, r1 in merged:
+    for clump in merged_clumps:
         if largest is None:
-            largest = (r0, r1)
-        elif sum(accel[r0:r1]) > sum(accel[largest[0]:largest[1]]):
-            largest = (r0, r1)
-    return largest, merged
+            largest = clump
+        elif sum(accel[slice(*clump)]) > sum(accel[slice(*largest)]):
+            largest = clump
+
+    return largest, merged_clumps
 
 
 def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
@@ -81,7 +83,7 @@ def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
     # determine if wheel lockup occurs
     # look at raw speed and filtered acceleration
     lockup_indices = np.where((v < 0.2) &
-                              (filtered_acceleration > 3))[0]
+                              (filtered_acceleration > 2.5))[0]
     lockup_ranges = util.get_contiguous_numbers(lockup_indices)
 
     # calculate braking indices by removing lockup ranges
@@ -155,10 +157,13 @@ def plot_rider_velocities(recs, rider_id, **kwargs):
                    linewidth=1,zorder=1)
 
         largest_range, all_ranges = get_trial_braking_indices(af)
-        for r0, r1 in all_ranges:
-            ax.axvspan(t[r0], t[r1], color=colors[5], alpha=0.2)
+        for clump in all_ranges:
+            ax.axvspan(t[clump.start],
+                       t[clump.stop],
+                       color=colors[5], alpha=0.2)
         if largest_range is not None:
-            ax.axvspan(t[largest_range[0]], t[largest_range[1]],
+            ax.axvspan(t[largest_range.start],
+                       t[largest_range.stop],
                        color=colors[5], alpha=0.4)
     return fig, axes
 
@@ -187,14 +192,8 @@ def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
     tw = 10
     tb = t[l1] - t[l0]
     assert tb < tw
-    # try to center
-    i0 = int((l1 + l0)/2 - (l1 - l0)/2 * tw/tb)
-    i1 = int((l1 + l0)/2 + (l1 - l0)/2 * tw/tb)
-    # shift to left if the braking event can't be centered
-    if i1 > len(trial):
-        n = i1 - len(trial) + 1
-        i0 -= n
-        i1 -= n
+    i0 = 0
+    i1 = -1
 
     # plot filtered signals
     ax.plot(t[i0:i1], vf[i0:i1], color=vc,

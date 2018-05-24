@@ -372,7 +372,7 @@ class Trial2(Trial):
         exit_time = None
         exit_clumps = np.ma.extras._ezclump(exit_mask > 0)
         for clump in exit_clumps:
-            t = self.lidar.time[clump.stop]
+            t = self.lidar.time[clump.stop - 1] # make exit time inclusive
             if (t >= self.bicycle.time[evt_index[0]] and
                 t < self.bicycle.time[evt_index[1]]):
                 exit_time = t
