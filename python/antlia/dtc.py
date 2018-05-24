@@ -68,7 +68,7 @@ def plot_closest_pair(cluster_a, cluster_b,
         return_pair = True
 
     if ax is None:
-        _, ax = plt.subplots()
+        _, ax = plt.subplots(**kwargs)
 
     # plot clusters
     ax.plot(*zip(*cluster_a),
