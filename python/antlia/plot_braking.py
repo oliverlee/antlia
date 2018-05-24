@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import numpy as np
+import scipy.spatial
 import scipy.stats
 import matplotlib.lines
+import matplotlib.patches
+import matplotlib.collections
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -262,7 +265,7 @@ def plot_histograms(stats, **kwargs):
     return fig, axes
 
 
-def plot_bivariates(stats):
+def plot_bivariates(stats, show_hull=False):
     current_palette = sns.utils.get_color_cycle()
     n_colors = stats['rider id'].max() + 1
 
@@ -285,6 +288,7 @@ def plot_bivariates(stats):
         name, unit = yf
         x = stats['linregress slope']
         y = stats[name]
+
         g = sns.JointGrid(x=x, y=y)
         g.plot_marginals(sns.distplot, kde=False,
                          color=sns.xkcd_palette(['charcoal'])[0])
@@ -296,6 +300,25 @@ def plot_bivariates(stats):
         g.set_axis_labels('slope [m/s^2]', '{} [{}]'.format(yf, unit))
         g.fig.suptitle('scatterplots of braking events')
         g.fig.set_size_inches(12.76, 7.19) # fix size for pdf save
+
+        if show_hull:
+            patches = []
+            for rid in riders:
+                index = stats['rider id'] == rid
+                m = stats[index][['linregress slope', name]].copy()
+                X = m.view(np.float64).reshape(m.shape[0], -1)
+
+                hull = scipy.spatial.ConvexHull(X)
+                polygon = matplotlib.patches.Polygon(X[hull.vertices, :],
+                                                     closed=True,
+                                                     zorder=1,
+                                                     facecolor=colors[rid])
+                patches.append(polygon)
+            p = matplotlib.collections.PatchCollection(patches,
+                                                       match_original=True,
+                                                       alpha=0.05)
+            g.ax_joint.add_collection(p)
+
         grids.append(g)
     return grids
 
