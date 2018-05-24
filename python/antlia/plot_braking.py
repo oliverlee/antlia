@@ -289,7 +289,7 @@ def plot_bivariates(stats):
         g.plot_marginals(sns.distplot, kde=False,
                          color=sns.xkcd_palette(['charcoal'])[0])
         g.plot_joint(plt.scatter,
-                     color=list(map(lambda x: colors[x - 1], stats['rider id'])))
+                     color=list(map(lambda x: colors[x], stats['rider id'])))
         g.ax_joint.legend(handles=proxy_lines, ncol=2, title=
                 'pearson r = {:.2g}, p = {:.2g}'.format(
                     *scipy.stats.pearsonr(x, y)))
