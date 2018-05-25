@@ -133,6 +133,14 @@ class Event(Trial):
         stationary_mask = np.zeros(bb_mask.shape, dtype=bool)
         cluster_data = []
         stationary_count = 0
+
+        zrange = X[-1, 2] - X[0, 2]
+        zmidpoint = zrange/2
+        top_index = X[:, 2] < zmidpoint
+        bot_index = X[:, 2] >= zmidpoint
+        area = lambda x: x[:, :2].ptp(axis=0).prod()
+
+        extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
             index = hdb.labels_ == label
 
@@ -142,12 +150,53 @@ class Event(Trial):
             # (non-noise) clusters with large zspan
             stationary = label != -1 and zspan > min_zspan*z.shape[0]
 
+            # however if zmean is not near zmidpoint, part of the cyclist
+            # trajectory has been grouped into this cluster and we must
+            # manually split it
+            if stationary and abs(zmean - zmidpoint) > 0.1*zrange:
+                Xitop = X[top_index][index[top_index]]
+                Xibot = X[bot_index][index[bot_index]]
+
+                # determine which half has a smaller xy bounding box
+                if area(Xitop) < area(Xibot):
+                    Xhalf = Xitop
+                else:
+                    Xhalf = Xibot
+
+                # get bounding box for half where the cyclist is _not_ there
+                xmin, ymin, _ = Xhalf.min(axis=0)
+                xmax, ymax, _ = Xhalf.max(axis=0)
+
+                # track indices with a masked array
+                Y = np.ma.masked_array(X)
+                Y[~index] = np.ma.masked
+
+                # get all points within bounding box for both halves
+                within = ((Y[:, 0] > xmin) & (Y[:, 0] < xmax) &
+                          (Y[:, 1] > ymin) & (Y[:, 1] < ymax))
+                index = within
+
+                # determine points associated with cyclist
+                Y[within] = np.ma.masked
+                extra_cluster_index |= ~Y.mask[:, 0]
+
             cluster_data.append(ClusterData(
                 label, index, zmean, zspan, stationary))
 
             if stationary:
                 stationary_count += 1
                 stationary_mask[not_bb_mask_index[index]] = True
+
+        # if we manually split a cluster, need to add new cluster containing
+        # all the excluded points
+        if np.any(extra_cluster_index):
+            label = max(cluster_labels) + 1
+            index = extra_cluster_index
+            zmean = X[index, 2].mean()
+            zspan = len(set(X[index, 2]))
+            stationary = False
+            cluster_data.append(ClusterData(
+                label, index, zmean, zspan, stationary))
 
         bb_mask = bb_mask.reshape(x.mask.shape)
         stationary_mask = stationary_mask.reshape(x.mask.shape)
@@ -240,6 +289,7 @@ class Event(Trial):
         self._set_radius_mask(X)
 
         # exclude stationary noise
+        #self._set_obstacle_mask(Y)
         self._set_radius_mask(Y)
 
         # get closest pair and perform distance calculation
@@ -304,18 +354,30 @@ class Event(Trial):
         labels = list(set(hdb.labels_))
 
         if raise_error:
-            if max(labels) != 0:
-                msg = 'Found more than one cluster: {}'.format(labels)
-                msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
-                raise ValueError(msg)
-            noise_count = np.count_nonzero(hdb.labels_ == -1)
-            if noise_count > 0.1*X.shape[0]:
-                msg = 'More than 10% of points are classified as noise:'
-                msg += ' ({}/{})'.format(noise_count, X.shape[0])
-                msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
-                raise ValueError(msg)
+            Event.__check_single_cluster(hdb, labels, hdbscan_kw)
 
         return hdb, labels
+
+    @staticmethod
+    def __check_single_cluster(hdb, labels, hdbscan_kw, warn=False):
+        if max(labels) != 0:
+            msg = 'Found more than one cluster: {}'.format(labels)
+            msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
+            if warn:
+                warnings.warn(msg)
+            else:
+                raise ValueError(msg)
+
+        noise_count = np.count_nonzero(hdb.labels_ == -1)
+        n = len(hdb.labels_)
+        if noise_count > 0.2*n:
+            msg = 'More than 20% of points are classified as noise:'
+            msg += ' ({}/{})'.format(noise_count, n)
+            msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
+            if warn:
+                warnings.warn(msg)
+            else:
+                raise ValueError(msg)
 
     def _plot_stationary_clusters(self, lidar_index,
                                   hdbscan_kw=None, ax=None, **fig_kw):
@@ -348,13 +410,8 @@ class Event(Trial):
             hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
                                                     raise_error=False)
         print('Using {}'.format(hdbscan_kw))
-        if max(labels) != 0:
-            msg = 'Found more than one cluster. Change cluster parameters.'
-            warnings.warn(msg, UserWarning)
-        if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
-            msg = 'More than 10% of points are classified as noise.'
-            msg += ' Change cluster parameters.'
-            warnings.warn(msg, UserWarning)
+        #self.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
+        Event.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
 
         noise_color = 'dimgray'
         n_colors = len(labels) - 1
