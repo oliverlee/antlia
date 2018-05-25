@@ -148,22 +148,19 @@ class Event(Trial):
         zmean = lambda i: X[i, 2].mean()
         zspan = lambda i: len(set(X[i, 2]))
 
-        outside_midpoint = lambda i: abs(zmean(i) - zmidpoint) > 0.1*zrange
-        large_area = lambda x: area(x) > area_limit
-
         extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
             index = hdb.labels_ == label
 
             # (non-noise) clusters with large zspan
-            stationary = label != -1 and zspan(index) > min_zspan*z.shape[0]
+            stationary = (label != -1 and
+                          (zspan(index) > min_zspan*z.shape[0] or
+                           (zspan(index) > 0.3*z.shape[0] and
+                            area(X[index]) < area_limit)))
 
-            # however if zmean is not near zmidpoint OR the xy area is large
-            # part of the cyclist trajectory has been grouped into this cluster
-            # and we must manually split it
-            if (stationary and
-                (outside_midpoint(index) or large_area(X[index]))):
-
+            # if the xy area is large, part of the cyclist trajectory has been
+            # grouped into this cluster and we must manually split it
+            if stationary and area(X[index]) > area_limit:
                 # determine which set has a smaller xy area/bounding box
                 Xj = None
                 min_area = None
