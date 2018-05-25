@@ -7,6 +7,7 @@ import matplotlib.lines
 import matplotlib.patches
 import matplotlib.collections
 import matplotlib.pyplot as plt
+import pandas as pd
 import seaborn as sns
 
 from antlia import filter as ff
@@ -323,27 +324,33 @@ def plot_bivariates(stats, show_hull=False):
     return grids
 
 
+def get_dataframe(stats):
+    df = pd.DataFrame(stats[[
+            'linregress slope',
+            'linregress intercept',
+            'linregress r-value',
+            'linregress p-value',
+            'linregress stderr',
+            'starting velocity',
+            'braking duration',
+            'braking distance',
+            'braking starttime',
+            'braking endtime',
+            'window size',
+            #'braking range', pandas data frame data must be 1-dimensional
+            'lockup ranges',
+            'rider id',
+            'trial id']])
+    return df
+
+
 def plot_swarms(stats, **kwargs):
     fig, axes = plt.subplots(4, 1, sharex=True, **kwargs)
     fig.suptitle('swarm plot of braking metrics per rider')
     axes = axes.ravel()
     yfields.append(('linregress slope', 'm/s^2'))
-    import pandas as pd
-    df = pd.DataFrame(stats[[
-    'linregress slope',
-    'linregress intercept',
-    'linregress r-value',
-    'linregress p-value',
-    'linregress stderr',
-    'starting velocity',
-    'braking duration',
-    'braking distance',
-    'window size',
-    #'braking range', pandas data frame data must be 1-dimensional
-    'lockup ranges',
-    'rider id',
-    'trial id',
-        ]])
+
+    df = get_dataframe(stats)
     for yf, ax in zip(yfields, axes):
         y = yf[0]
         sns.swarmplot(x='rider id', y=y, ax=ax, data=df, hue='rider id')
