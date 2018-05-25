@@ -116,16 +116,24 @@ class Event(Trial):
             z.compressed())).transpose()
 
         if hdbscan_kw is None:
-            hdbscan_kw = {}
+            hdbscan_kw = {
+                'min_cluster_size': 30,
+                'min_samples': 15,
+                'metric': 'euclidean'
+            }
 
         hdbscan_kw['allow_single_cluster'] = False
-        hdbscan_kw.setdefault('min_cluster_size', 30)
-        hdbscan_kw.setdefault('min_samples', 15)
-        hdbscan_kw.setdefault('metric', 'euclidean')
 
         # cluster
         hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
         cluster_labels = list(set(hdb.labels_))
+
+        # change parameters to get fewer clusters
+        if len(cluster_labels) > 100:
+            hdbscan_kw['min_cluster_size'] = 60
+            hdbscan_kw['min_samples'] = 40
+            hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
+            cluster_labels = list(set(hdb.labels_))
 
         # determine cluster data and stationarity
         bb_mask = bb_mask.reshape(-1)
@@ -435,7 +443,6 @@ class Event(Trial):
         else:
             hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
                                                     raise_error=False)
-        print('Using {}'.format(hdbscan_kw))
         self.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
 
         noise_color = 'dimgray'
