@@ -22,7 +22,7 @@ EventDetectionData = namedtuple(
 
 ClusterData = namedtuple(
         'ClusterData',
-        ['label', 'index', 'zmean', 'zspan', 'stationary'])
+        ['label', 'index', 'zmean', 'zspan', 'count', 'area', 'stationary'])
 
 FakeHdb = namedtuple(
         'FakeHdb',
@@ -136,36 +136,52 @@ class Event(Trial):
 
         zrange = X[-1, 2] - X[0, 2]
         zmidpoint = zrange/2
-        top_index = X[:, 2] < zmidpoint
-        bot_index = X[:, 2] >= zmidpoint
+
+        indexA = X[:, 2] < zrange/4
+        indexB = (X[:, 2] >= zrange/4) & (X[:, 2] <= 2*zrange/4)
+        indexC = (X[:, 2] >= 2*zrange/4) & (X[:, 2] <= 3*zrange/4)
+        indexD = X[:, 2] >= 3*zrange/4
+        indexi = [indexA, indexB, indexC, indexD]
+
+        area_limit = 0.2
         area = lambda x: x[:, :2].ptp(axis=0).prod()
+        zmean = lambda i: X[i, 2].mean()
+        zspan = lambda i: len(set(X[i, 2]))
+
+        outside_midpoint = lambda i: abs(zmean(i) - zmidpoint) > 0.1*zrange
+        large_area = lambda x: area(x) > area_limit
 
         extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
             index = hdb.labels_ == label
 
-            zmean = X[index, 2].mean()
-            zspan = len(set(X[index, 2]))
-
             # (non-noise) clusters with large zspan
-            stationary = label != -1 and zspan > min_zspan*z.shape[0]
+            stationary = label != -1 and zspan(index) > min_zspan*z.shape[0]
 
-            # however if zmean is not near zmidpoint, part of the cyclist
-            # trajectory has been grouped into this cluster and we must
-            # manually split it
-            if stationary and abs(zmean - zmidpoint) > 0.1*zrange:
-                Xitop = X[top_index][index[top_index]]
-                Xibot = X[bot_index][index[bot_index]]
+            # however if zmean is not near zmidpoint OR the xy area is large
+            # part of the cyclist trajectory has been grouped into this cluster
+            # and we must manually split it
+            if (stationary and
+                (outside_midpoint(index) or large_area(X[index]))):
 
-                # determine which half has a smaller xy bounding box
-                if area(Xitop) < area(Xibot):
-                    Xhalf = Xitop
-                else:
-                    Xhalf = Xibot
+                # determine which set has a smaller xy area/bounding box
+                Xj = None
+                min_area = None
+                for i in indexi:
+                    Xi = X[i][index[i]]
+
+                    if Xi.shape[0] < 10:
+                        # skip index set with fewer cluster points than minimum
+                        continue
+
+                    a = area(Xi)
+                    if min_area is None or a < min_area:
+                        min_area = a
+                        Xj = Xi
 
                 # get bounding box for half where the cyclist is _not_ there
-                xmin, ymin, _ = Xhalf.min(axis=0)
-                xmax, ymax, _ = Xhalf.max(axis=0)
+                xmin, ymin, _ = Xj.min(axis=0)
+                xmax, ymax, _ = Xj.max(axis=0)
 
                 # track indices with a masked array
                 Y = np.ma.masked_array(X)
@@ -181,7 +197,13 @@ class Event(Trial):
                 extra_cluster_index |= ~Y.mask[:, 0]
 
             cluster_data.append(ClusterData(
-                label, index, zmean, zspan, stationary))
+                label,
+                index,
+                zmean(index),
+                zspan(index),
+                np.count_nonzero(index),
+                area(X[index]),
+                stationary))
 
             if stationary:
                 stationary_count += 1
@@ -190,13 +212,15 @@ class Event(Trial):
         # if we manually split a cluster, need to add new cluster containing
         # all the excluded points
         if np.any(extra_cluster_index):
-            label = max(cluster_labels) + 1
             index = extra_cluster_index
-            zmean = X[index, 2].mean()
-            zspan = len(set(X[index, 2]))
-            stationary = False
             cluster_data.append(ClusterData(
-                label, index, zmean, zspan, stationary))
+                max(cluster_labels) + 1,
+                index,
+                zmean(index),
+                zspan(index),
+                np.count_nonzero(index),
+                area(X[index]),
+                False))
 
         bb_mask = bb_mask.reshape(x.mask.shape)
         stationary_mask = stationary_mask.reshape(x.mask.shape)
@@ -225,7 +249,8 @@ class Event(Trial):
             raise TypeError('X.shape must be (n, 2)')
 
         X.mask = np.ma.nomask
-        centroid = X.mean(axis=0)
+        #centroid = X.mean(axis=0)
+        centroid = np.median(X.data, axis=0)
         distances = scipy.spatial.distance.cdist(X, centroid.reshape((1, 2)))
         index = np.matlib.repmat(
                     distances > radius,
@@ -264,26 +289,35 @@ class Event(Trial):
 
         Y[hdb.labels_ != 0] = np.ma.masked
 
+    def _compressed_points(self, lidar_index, stationary):
+        """Return an array with the points at a given lidar frame.
+
+        Parameters:
+        lidar_index: int, valid lidar frame index within the Event
+        stationary: bool, if the stationary_mask should be applied
+        """
+        if stationary:
+            mask = self.bb_mask | self.stationary_mask
+        else:
+            mask = self.bb_mask | ~self.stationary_mask
+        x = np.ma.masked_where(mask, self.x, copy=True)
+        y = np.ma.masked_where(mask, self.y, copy=True)
+
+        X = np.ma.masked_array(np.vstack((
+                x[lidar_index].compressed(),
+                y[lidar_index].compressed())).T)
+        return X
+
     def _calculate_dtc(self, lidar_index):
         """Calculate the distance between the bicycle and obstacle at lidar
         index. Returns the calculated distance, bicycle points, and stationary
         points.
         """
         # bicycle
-        bicycle_mask = self.bb_mask | self.stationary_mask
-        x = np.ma.masked_where(bicycle_mask, self.x, copy=True)
-        y = np.ma.masked_where(bicycle_mask, self.y, copy=True)
-        X = np.ma.masked_array(np.vstack((
-                x[lidar_index].compressed(),
-                y[lidar_index].compressed())).T)
+        X = self._compressed_points(lidar_index, False)
 
         # stationary
-        stationary_mask = self.bb_mask | ~self.stationary_mask
-        x = np.ma.masked_where(stationary_mask, self.x, copy=True)
-        y = np.ma.masked_where(stationary_mask, self.y, copy=True)
-        Y = np.ma.masked_array(np.vstack((
-                x[lidar_index].compressed(),
-                y[lidar_index].compressed())).T)
+        Y = self._compressed_points(lidar_index, True)
 
         # exclude bicycle noise
         self._set_radius_mask(X)
@@ -383,12 +417,7 @@ class Event(Trial):
                                   hdbscan_kw=None, ax=None, **fig_kw):
         """Plot stationary clusters for a single lidar frame. """
         # stationary
-        stationary_mask = self.bb_mask | ~self.stationary_mask
-        x = np.ma.masked_where(stationary_mask, self.x, copy=True)
-        y = np.ma.masked_where(stationary_mask, self.y, copy=True)
-        X = np.ma.masked_array(np.vstack((
-                x[lidar_index].compressed(),
-                y[lidar_index].compressed())).T)
+        X = self._compressed_points(lidar_index, True)
 
         if hdbscan_kw is None:
             hdbscan_kw = {
@@ -410,8 +439,7 @@ class Event(Trial):
             hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
                                                     raise_error=False)
         print('Using {}'.format(hdbscan_kw))
-        #self.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
-        Event.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
+        self.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
 
         noise_color = 'dimgray'
         n_colors = len(labels) - 1
