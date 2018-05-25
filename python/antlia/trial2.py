@@ -73,7 +73,7 @@ class Event(Trial):
             self.stationary_count = None
             self._identify_stationary(invalid_bb=invalid_bb)
 
-    def _identify_stationary(self, min_zspan=0.5, zscale=0.0005,
+    def _identify_stationary(self, min_zspan=0.7, zscale=0.0005,
                              hdbscan_kw=None, invalid_bb=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
 
