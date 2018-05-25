@@ -302,9 +302,9 @@ class Event(Trial):
         stationary: bool, if the stationary_mask should be applied
         """
         if stationary:
-            mask = self.bb_mask | self.stationary_mask
-        else:
             mask = self.bb_mask | ~self.stationary_mask
+        else:
+            mask = self.bb_mask | self.stationary_mask
         x = np.ma.masked_where(mask, self.x, copy=True)
         y = np.ma.masked_where(mask, self.y, copy=True)
 
