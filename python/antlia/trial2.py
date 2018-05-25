@@ -5,6 +5,7 @@ import warnings
 
 import numpy as np
 import scipy.signal
+import scipy.spatial
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
@@ -162,8 +163,9 @@ class Event(Trial):
         self.stationary_count = stationary_count
 
     @staticmethod
-    def _set_obstacle_mask(X):
-        """Sets the mask of X to exclude stationary noise.
+    def _set_radius_mask(X, radius=1.5):
+        """Sets the mask of X to invalidate points far from the cluster
+        centroid, where X contains the points for a single lidar frame.
 
         Parameters:
         X: masked array with shape (n, 2)
@@ -174,6 +176,28 @@ class Event(Trial):
             raise TypeError('X.shape must be (n, 2)')
 
         X.mask = np.ma.nomask
+        centroid = X.mean(axis=0)
+        distances = scipy.spatial.distance.cdist(X, centroid.reshape((1, 2)))
+        index = np.matlib.repmat(
+                    distances > radius,
+                    1,
+                    2)
+        X[index] = np.ma.masked
+
+    @staticmethod
+    def _set_obstacle_mask(Y):
+        """Sets the mask of Y to exclude stationary noise, where Y contains the
+        points for a single lidar frame.
+
+        Parameters:
+        Y: masked array with shape (n, 2)
+        """
+        if len(Y.shape) != 2:
+            raise TypeError('Y.shape must be (n, 2)')
+        if Y.shape[1] != 2:
+            raise TypeError('Y.shape must be (n, 2)')
+
+        Y.mask = np.ma.nomask
 
         hdbscan_kw = {}
         hdbscan_kw['allow_single_cluster'] = True
@@ -183,21 +207,13 @@ class Event(Trial):
 
         # try clustering to find obstacle
         try:
-            hdb, labels = Event.__get_single_cluster(X, hdbscan_kw)
+            hdb, labels = Event.__get_single_cluster(Y, hdbscan_kw)
         except ValueError:
-            hdbscan_kw['min_cluster_size'] = hdbscan_kw['min_cluster_size']//2
-            hdbscan_kw['min_samples'] = hdbscan_kw['min_samples']*2//3
-            hdb, labels = Event.__get_single_cluster(X, hdbscan_kw)
+            hdbscan_kw['min_cluster_size'] = 15
+            hdbscan_kw['min_samples'] = 10
+            hdb, labels = Event.__get_single_cluster(Y, hdbscan_kw)
 
-        if max(labels) != 0:
-            msg = 'Found more than one cluster. Change cluster parameters.'
-            raise ValueError(msg)
-        if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
-            msg = 'More than 10% of points are classified as noise.'
-            msg += ' Change cluster parameters.'
-            raise ValueError(msg)
-
-        X[hdb.labels_ != 0] = np.ma.masked
+        Y[hdb.labels_ != 0] = np.ma.masked
 
     def _calculate_dtc(self, lidar_index):
         """Calculate the distance between the bicycle and obstacle at lidar
@@ -208,9 +224,9 @@ class Event(Trial):
         bicycle_mask = self.bb_mask | self.stationary_mask
         x = np.ma.masked_where(bicycle_mask, self.x, copy=True)
         y = np.ma.masked_where(bicycle_mask, self.y, copy=True)
-        X = np.vstack((
+        X = np.ma.masked_array(np.vstack((
                 x[lidar_index].compressed(),
-                y[lidar_index].compressed())).T
+                y[lidar_index].compressed())).T)
 
         # stationary
         stationary_mask = self.bb_mask | ~self.stationary_mask
@@ -220,8 +236,11 @@ class Event(Trial):
                 x[lidar_index].compressed(),
                 y[lidar_index].compressed())).T)
 
+        # exclude bicycle noise
+        self._set_radius_mask(X)
+
         # exclude stationary noise
-        self._set_obstacle_mask(Y)
+        self._set_radius_mask(Y)
 
         # get closest pair and perform distance calculation
         pair = dtc.bcp(X, Y)
@@ -238,6 +257,10 @@ class Event(Trial):
 
         colors = sns.color_palette('Paired', 10)
         dtc.plot_closest_pair(X, Y, pair=pair, ax=ax, color=colors[1::2])
+
+        # plot bicycle noise
+        X.mask = ~X.mask
+        ax.scatter(*X.T, color=colors[0])
 
         # plot stationary noise
         Y.mask = ~Y.mask
@@ -282,11 +305,14 @@ class Event(Trial):
 
         if raise_error:
             if max(labels) != 0:
-                msg = 'Found more than one cluster. Change cluster parameters.'
+                msg = 'Found more than one cluster: {}'.format(labels)
+                msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
                 raise ValueError(msg)
-            if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
-                msg = 'More than 10% of points are classified as noise.'
-                msg += ' Change cluster parameters.'
+            noise_count = np.count_nonzero(hdb.labels_ == -1)
+            if noise_count > 0.1*X.shape[0]:
+                msg = 'More than 10% of points are classified as noise:'
+                msg += ' ({}/{})'.format(noise_count, X.shape[0])
+                msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
                 raise ValueError(msg)
 
         return hdb, labels
@@ -321,7 +347,7 @@ class Event(Trial):
         else:
             hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
                                                     raise_error=False)
-
+        print('Using {}'.format(hdbscan_kw))
         if max(labels) != 0:
             msg = 'Found more than one cluster. Change cluster parameters.'
             warnings.warn(msg, UserWarning)
