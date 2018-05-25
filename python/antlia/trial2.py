@@ -23,6 +23,10 @@ ClusterData = namedtuple(
         'ClusterData',
         ['label', 'index', 'zmean', 'zspan', 'stationary'])
 
+FakeHdb = namedtuple(
+        'FakeHdb',
+        ['labels_'])
+
 ENTRY_BB = {
     'xlim': (20, 30),
     'ylim': (2.5, 3.5)
@@ -225,12 +229,12 @@ class Event(Trial):
         return dist, pair, X, Y
 
     def _plot_closest_pair(self, lidar_index, ax=None, **fig_kw):
+        _, pair, X, Y = self._calculate_dtc(lidar_index)
+
         if ax is None:
             fig, ax = plt.subplots(**fig_kw)
         else:
             fig = ax.get_figure()
-
-        _, pair, X, Y = self._calculate_dtc(lidar_index)
 
         colors = sns.color_palette('Paired', 10)
         dtc.plot_closest_pair(X, Y, pair=pair, ax=ax, color=colors[1::2])
@@ -261,17 +265,29 @@ class Event(Trial):
         return np.interp(timestamp, times, distances)
 
     @staticmethod
-    def __get_single_cluster(X, hdbscan_kw):
+    def __get_single_cluster(X, hdbscan_kw, raise_error=True):
+        # if all points are within obstacle bounding box, skip clustering
+        if (np.all(X[:, 0] > OBSTACLE_BB['xlim'][0]) and
+            np.all(X[:, 0] < OBSTACLE_BB['xlim'][1]) and
+            np.all(X[:, 1] > OBSTACLE_BB['ylim'][0]) and
+            np.all(X[:, 1] < OBSTACLE_BB['ylim'][1])):
+
+            # we only use the 'labels_' attribute of hdb
+            hdb = FakeHdb(np.zeros(X.shape[0],))
+            labels = [0]
+            return hdb, labels
+
         hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
         labels = list(set(hdb.labels_))
 
-        if max(labels) != 0:
-            msg = 'Found more than one cluster. Change cluster parameters.'
-            raise ValueError(msg)
-        if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
-            msg = 'More than 10% of points are classified as noise.'
-            msg += ' Change cluster parameters.'
-            raise ValueError(msg)
+        if raise_error:
+            if max(labels) != 0:
+                msg = 'Found more than one cluster. Change cluster parameters.'
+                raise ValueError(msg)
+            if np.count_nonzero(hdb.labels_ == -1) > 0.1*X.shape[0]:
+                msg = 'More than 10% of points are classified as noise.'
+                msg += ' Change cluster parameters.'
+                raise ValueError(msg)
 
         return hdb, labels
 
@@ -287,20 +303,24 @@ class Event(Trial):
                 y[lidar_index].compressed())).T)
 
         if hdbscan_kw is None:
-            hdbscan_kw = {}
+            hdbscan_kw = {
+                'min_cluster_size': 30,
+                'min_samples': 15,
+                'metric': 'euclidean',
+                'allow_single_cluster': True,
+            }
 
-        hdbscan_kw['allow_single_cluster'] = True
-        hdbscan_kw.setdefault('min_cluster_size', 30)
-        hdbscan_kw.setdefault('min_samples', 15)
-        hdbscan_kw.setdefault('metric', 'euclidean')
-
-        # try clustering to find obstacle
-        try:
-            hdb, labels = self.__get_single_cluster(X, hdbscan_kw)
-        except ValueError:
-            hdbscan_kw['min_cluster_size'] = hdbscan_kw['min_cluster_size']//2
-            hdbscan_kw['min_samples'] = hdbscan_kw['min_samples']*2//3
-            hdb, labels = self.__get_single_cluster(X, hdbscan_kw)
+            # try clustering to find obstacle
+            try:
+                hdb, labels = self.__get_single_cluster(X, hdbscan_kw)
+            except ValueError:
+                hdbscan_kw['min_cluster_size'] = 15
+                hdbscan_kw['min_samples'] = 10
+                hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
+                                                        raise_error=False)
+        else:
+            hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
+                                                    raise_error=False)
 
         if max(labels) != 0:
             msg = 'Found more than one cluster. Change cluster parameters.'
