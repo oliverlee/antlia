@@ -68,15 +68,15 @@ def plot_closest_pair(cluster_a, cluster_b,
         return_pair = True
 
     if ax is None:
-        _, ax = plt.subplots()
+        _, ax = plt.subplots(**kwargs)
 
     # plot clusters
-    ax.plot(*zip(*cluster_a),
+    ax.plot(*cluster_a.T,
             linestyle='None',
             marker='.',
             color=colors[0],
             label='cluster A')
-    ax.plot(*zip(*cluster_b), marker='.',
+    ax.plot(*cluster_b.T, marker='.',
             linestyle='None',
             color=colors[1],
             label='cluster B')
@@ -96,7 +96,7 @@ def plot_closest_pair(cluster_a, cluster_b,
             label='closest pair B')
 
     # plot line connecting closest pair
-    ax.plot(*zip(*np.vstack(pair)),
+    ax.plot(*np.vstack(pair).T,
             color=colors[2],
             label='closest pair line')
 

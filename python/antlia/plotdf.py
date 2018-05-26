@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 import numpy as np
+import scipy.spatial
 import matplotlib.pyplot as plt
+import matplotlib.patches
+import matplotlib.collections
 import seaborn as sns
 import warnings
 
@@ -20,7 +23,8 @@ def colormap(dataframe, color_key, color_palette):
             dataframe.as_matrix([color_key]))
     return np.array(x).transpose().reshape((-1, 3))
 
-def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
+def plotjoint(x, y, dataframe, kde_key=None, color_map=None,
+              show_hull=True, g=None, **kwargs):
     """Return a vector of colors for each dataframe column, to be used with
     seaborn plots.
 
@@ -34,6 +38,8 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
     color_map: nx3 color array, If not 'None' and 'kde_key' is not None, plot
                each element with color specified by corresponding row in scatter
                plot. If 'kde_key' is not None, this parameter is ignored.
+    show_hull: bool, Draws convex hulls around points. 'kde_key' must be
+               specified otherwise this option is ignored.
     """
     if g is None:
         # initialize figure
@@ -50,6 +56,9 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
         if kde_key is not None:
             color_map = colormap(dataframe, *kde_key)
         g.plot_joint(plt.scatter, color=color_map, **kwargs)
+
+    xlim = g.ax_joint.get_xlim()
+    ylim = g.ax_joint.get_ylim()
 
     if kde_key:
         color_key, color_palette = kde_key
@@ -73,13 +82,33 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None, g=None, **kwargs):
     except AttributeError:
         pass
 
-    g.ax_joint.relim()
-    g.ax_joint.autoscale()
+    if show_hull and kde_key is not None:
+        patches = []
+        for i in dataframe[color_key].unique():
+            color = color_palette[int(i)]
+            index = dataframe[color_key] == i
+            X = dataframe[index][[x, y]].as_matrix()
+
+            hull = scipy.spatial.ConvexHull(X)
+            polygon = matplotlib.patches.Polygon(X[hull.vertices, :],
+                                                 closed=True,
+                                                 zorder=1,
+                                                 facecolor=color)
+            patches.append(polygon)
+        p = matplotlib.collections.PatchCollection(patches,
+                                                   match_original=True,
+                                                   alpha=0.05)
+        g.ax_joint.add_collection(p)
 
     # rescale limits of kde plots
     g.ax_marg_x.relim()
     g.ax_marg_x.autoscale()
     g.ax_marg_y.relim()
     g.ax_marg_y.autoscale()
+
+    ## manually set the joint plot limits
+    ## this will clip the marginal plots a bit
+    g.ax_joint.set_xlim(xlim)
+    g.ax_joint.set_ylim(ylim)
 
     return g

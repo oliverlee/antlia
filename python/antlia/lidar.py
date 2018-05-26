@@ -55,11 +55,13 @@ class LidarRecord(np.recarray):
         vector with equal shape and mask as x and y.
         """
         x, y = self.cartesian(xlim=xlim, ylim=ylim, rlim=rlim)
-        z = np.ma.array(np.matlib.repmat(
-                self.time.reshape((-1, 1)),
-                1,
-                x.shape[1]))
-        z.mask = x.mask
+        z = np.ma.masked_where(
+                x.mask,
+                np.matlib.repmat(
+                    self.time.reshape((-1, 1)),
+                    1,
+                    x.shape[1]),
+                copy=True)
         return x, y, z
 
     def object_count(self, xlim=None, ylim=None, rlim=None):

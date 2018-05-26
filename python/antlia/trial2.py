@@ -5,21 +5,16 @@ import warnings
 
 import numpy as np
 import scipy.signal
+import scipy.spatial
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
 import hdbscan
 
+from antlia import dtc
 import antlia.filter as ff
 from antlia.trial import Trial
 import antlia.util as util
-
-class EventType(Enum):
-    Braking = 0
-    Overtaking = 1
-
-    def __str__(self):
-        return self.name
 
 EventDetectionData = namedtuple(
         'EventDetectionData',
@@ -27,7 +22,11 @@ EventDetectionData = namedtuple(
 
 ClusterData = namedtuple(
         'ClusterData',
-        ['label', 'index', 'zmean', 'zspan', 'stationary'])
+        ['label', 'index', 'zmean', 'zspan', 'count', 'area', 'stationary'])
+
+FakeHdb = namedtuple(
+        'FakeHdb',
+        ['labels_'])
 
 ENTRY_BB = {
     'xlim': (20, 30),
@@ -45,6 +44,14 @@ VALID_BB = {
     'xlim': (-20, 60),
     'ylim': (1.0, 3.5)
 }
+
+
+class EventType(Enum):
+    Braking = 0
+    Overtaking = 1
+
+    def __str__(self):
+        return self.name
 
 
 class Event(Trial):
@@ -67,7 +74,7 @@ class Event(Trial):
             self.stationary_count = None
             self._identify_stationary(invalid_bb=invalid_bb)
 
-    def _identify_stationary(self, min_zspan=0.5, zscale=0.0005,
+    def _identify_stationary(self, min_zspan=0.7, zscale=0.0005,
                              hdbscan_kw=None, invalid_bb=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
 
@@ -80,18 +87,27 @@ class Event(Trial):
                 if 'xlim' in m and 'ylim' in m:
                     xmin, xmax = m['xlim']
                     ymin, ymax = m['ylim']
-                    x.mask |= (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax)
-                    y.mask = x.mask
+                    index = (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax)
+                    x[index] = ma.masked
 
-            z.mask = x.mask
-        bb_mask = x.mask
+        # use the same mask for x and y
+        y.mask = x.mask
 
-        # rescale z
+        # rescale z and then use the same mask as x and y
         assert z.shape[0] > 1
         z.mask = False
         z -= z[0, 0]
         z *= zscale/(z[1, 0] - z[0, 0])
-        z.mask = bb_mask
+        z.mask = x.mask
+
+        # make sure (at least) some entries in x, y, z are masked so we don't
+        # perform clustering on all the points at the lidar boundary
+        assert np.any(x.mask)
+        assert np.any(y.mask)
+        assert np.any(z.mask)
+
+        # copy x.mask so we aren't referencing the same data
+        bb_mask = np.ma.getmaskarray(x).copy()
 
         # create point cloud data
         X = np.vstack((
@@ -100,42 +116,119 @@ class Event(Trial):
             z.compressed())).transpose()
 
         if hdbscan_kw is None:
-            hdbscan_kw = {}
+            hdbscan_kw = {
+                'min_cluster_size': 30,
+                'min_samples': 15,
+                'metric': 'euclidean'
+            }
 
         hdbscan_kw['allow_single_cluster'] = False
-        hdbscan_kw.setdefault('min_cluster_size', 30)
-        hdbscan_kw.setdefault('min_samples', 15)
-        hdbscan_kw.setdefault('metric', 'euclidean')
 
         # cluster
         hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
         cluster_labels = list(set(hdb.labels_))
 
+        # change parameters to get fewer clusters
+        if len(cluster_labels) > 100:
+            hdbscan_kw['min_cluster_size'] = 60
+            hdbscan_kw['min_samples'] = 40
+            hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
+            cluster_labels = list(set(hdb.labels_))
+
         # determine cluster data and stationarity
-        bb_mask_shape = bb_mask.shape
         bb_mask = bb_mask.reshape(-1)
         not_bb_mask_index = np.where(~bb_mask)[0]
         stationary_mask = np.zeros(bb_mask.shape, dtype=bool)
         cluster_data = []
         stationary_count = 0
+
+        zrange = X[-1, 2] - X[0, 2]
+        zmidpoint = zrange/2
+
+        indexA = X[:, 2] < zrange/4
+        indexB = (X[:, 2] >= zrange/4) & (X[:, 2] <= 2*zrange/4)
+        indexC = (X[:, 2] >= 2*zrange/4) & (X[:, 2] <= 3*zrange/4)
+        indexD = X[:, 2] >= 3*zrange/4
+        indexi = [indexA, indexB, indexC, indexD]
+
+        area_limit = 0.2
+        area = lambda x: x[:, :2].ptp(axis=0).prod()
+        zmean = lambda i: X[i, 2].mean()
+        zspan = lambda i: len(set(X[i, 2]))
+
+        extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
             index = hdb.labels_ == label
 
-            zmean = X[index, 2].mean()
-            zspan = len(set(X[index, 2]))
-
             # (non-noise) clusters with large zspan
-            stationary = label != -1 and zspan > min_zspan*z.shape[0]
+            stationary = (label != -1 and
+                          (zspan(index) > min_zspan*z.shape[0] or
+                           (zspan(index) > 0.3*z.shape[0] and
+                            area(X[index]) < area_limit)))
+
+            # if the xy area is large, part of the cyclist trajectory has been
+            # grouped into this cluster and we must manually split it
+            if stationary and area(X[index]) > area_limit:
+                # determine which set has a smaller xy area/bounding box
+                Xj = None
+                min_area = None
+                for i in indexi:
+                    Xi = X[i][index[i]]
+
+                    if Xi.shape[0] < 10:
+                        # skip index set with fewer cluster points than minimum
+                        continue
+
+                    a = area(Xi)
+                    if min_area is None or a < min_area:
+                        min_area = a
+                        Xj = Xi
+
+                # get bounding box for half where the cyclist is _not_ there
+                xmin, ymin, _ = Xj.min(axis=0)
+                xmax, ymax, _ = Xj.max(axis=0)
+
+                # track indices with a masked array
+                Y = np.ma.masked_array(X)
+                Y[~index] = np.ma.masked
+
+                # get all points within bounding box for both halves
+                within = ((Y[:, 0] > xmin) & (Y[:, 0] < xmax) &
+                          (Y[:, 1] > ymin) & (Y[:, 1] < ymax))
+                index = within
+
+                # determine points associated with cyclist
+                Y[within] = np.ma.masked
+                extra_cluster_index |= ~Y.mask[:, 0]
 
             cluster_data.append(ClusterData(
-                label, index, zmean, zspan, stationary))
+                label,
+                index,
+                zmean(index),
+                zspan(index),
+                np.count_nonzero(index),
+                area(X[index]),
+                stationary))
 
             if stationary:
                 stationary_count += 1
                 stationary_mask[not_bb_mask_index[index]] = True
 
-        bb_mask = bb_mask.reshape(bb_mask_shape)
-        stationary_mask = stationary_mask.reshape(bb_mask_shape)
+        # if we manually split a cluster, need to add new cluster containing
+        # all the excluded points
+        if np.any(extra_cluster_index):
+            index = extra_cluster_index
+            cluster_data.append(ClusterData(
+                max(cluster_labels) + 1,
+                index,
+                zmean(index),
+                zspan(index),
+                np.count_nonzero(index),
+                area(X[index]),
+                False))
+
+        bb_mask = bb_mask.reshape(x.mask.shape)
+        stationary_mask = stationary_mask.reshape(x.mask.shape)
 
         self.x = x
         self.y = y
@@ -146,6 +239,236 @@ class Event(Trial):
         self.bb_mask = bb_mask
         self.stationary_mask = stationary_mask
         self.stationary_count = stationary_count
+
+    @staticmethod
+    def _set_radius_mask(X, radius=1.5):
+        """Sets the mask of X to invalidate points far from the cluster
+        centroid, where X contains the points for a single lidar frame.
+
+        Parameters:
+        X: masked array with shape (n, 2)
+        """
+        if len(X.shape) != 2:
+            raise TypeError('X.shape must be (n, 2)')
+        if X.shape[1] != 2:
+            raise TypeError('X.shape must be (n, 2)')
+
+        X.mask = np.ma.nomask
+        #centroid = X.mean(axis=0)
+        centroid = np.median(X.data, axis=0)
+        distances = scipy.spatial.distance.cdist(X, centroid.reshape((1, 2)))
+        index = np.matlib.repmat(
+                    distances > radius,
+                    1,
+                    2)
+        X[index] = np.ma.masked
+
+    @staticmethod
+    def _set_obstacle_mask(Y):
+        """Sets the mask of Y to exclude stationary noise, where Y contains the
+        points for a single lidar frame.
+
+        Parameters:
+        Y: masked array with shape (n, 2)
+        """
+        if len(Y.shape) != 2:
+            raise TypeError('Y.shape must be (n, 2)')
+        if Y.shape[1] != 2:
+            raise TypeError('Y.shape must be (n, 2)')
+
+        Y.mask = np.ma.nomask
+
+        hdbscan_kw = {}
+        hdbscan_kw['allow_single_cluster'] = True
+        hdbscan_kw['min_cluster_size'] = 30
+        hdbscan_kw['min_samples'] = 15
+        hdbscan_kw['metric'] = 'euclidean'
+
+        # try clustering to find obstacle
+        try:
+            hdb, labels = Event.__get_single_cluster(Y, hdbscan_kw)
+        except ValueError:
+            hdbscan_kw['min_cluster_size'] = 15
+            hdbscan_kw['min_samples'] = 10
+            hdb, labels = Event.__get_single_cluster(Y, hdbscan_kw)
+
+        Y[hdb.labels_ != 0] = np.ma.masked
+
+    def _compressed_points(self, lidar_index, stationary):
+        """Return an array with the points at a given lidar frame.
+
+        Parameters:
+        lidar_index: int, valid lidar frame index within the Event
+        stationary: bool, if the stationary_mask should be applied
+        """
+        if stationary:
+            mask = self.bb_mask | ~self.stationary_mask
+        else:
+            mask = self.bb_mask | self.stationary_mask
+        x = np.ma.masked_where(mask, self.x, copy=True)
+        y = np.ma.masked_where(mask, self.y, copy=True)
+
+        X = np.ma.masked_array(np.vstack((
+                x[lidar_index].compressed(),
+                y[lidar_index].compressed())).T)
+        return X
+
+    def _calculate_dtc(self, lidar_index):
+        """Calculate the distance between the bicycle and obstacle at lidar
+        index. Returns the calculated distance, bicycle points, and stationary
+        points.
+        """
+        # bicycle
+        X = self._compressed_points(lidar_index, False)
+
+        # stationary
+        Y = self._compressed_points(lidar_index, True)
+
+        # exclude bicycle noise
+        self._set_radius_mask(X)
+
+        # exclude stationary noise
+        #self._set_obstacle_mask(Y)
+        self._set_radius_mask(Y)
+
+        # get closest pair and perform distance calculation
+        pair = dtc.bcp(X, Y)
+        dist = dtc.dist(*pair)
+        return dist, pair, X, Y
+
+    def _plot_closest_pair(self, lidar_index, ax=None, **fig_kw):
+        _, pair, X, Y = self._calculate_dtc(lidar_index)
+
+        if ax is None:
+            fig, ax = plt.subplots(**fig_kw)
+        else:
+            fig = ax.get_figure()
+
+        colors = sns.color_palette('Paired', 10)
+        dtc.plot_closest_pair(X, Y, pair=pair, ax=ax, color=colors[1::2])
+
+        # plot bicycle noise
+        X.mask = ~X.mask
+        ax.scatter(*X.T, color=colors[0])
+
+        # plot stationary noise
+        Y.mask = ~Y.mask
+        ax.scatter(*Y.T, color=colors[2])
+
+        return fig, ax
+
+    def calculate_dtc(self, timestamp):
+        """Return the distance between the bicycle and obstacle at timestamp.
+        """
+        assert timestamp >= self.bicycle.time[0]
+        assert timestamp <= self.bicycle.time[-1]
+        assert timestamp >= self.lidar.time[0]
+        assert timestamp <= self.lidar.time[-1]
+
+        i = self.lidar.frame_index(timestamp)
+        assert i > 0
+
+        times = []
+        distances = []
+        for j in [i - 1, i]:
+            times.append(self.lidar.time[j][0])
+            distances.append(self._calculate_dtc(j)[0])
+
+        return np.interp(timestamp, times, distances)
+
+    @staticmethod
+    def __get_single_cluster(X, hdbscan_kw, raise_error=True):
+        # if all points are within obstacle bounding box, skip clustering
+        if (np.all(X[:, 0] > OBSTACLE_BB['xlim'][0]) and
+            np.all(X[:, 0] < OBSTACLE_BB['xlim'][1]) and
+            np.all(X[:, 1] > OBSTACLE_BB['ylim'][0]) and
+            np.all(X[:, 1] < OBSTACLE_BB['ylim'][1])):
+
+            # we only use the 'labels_' attribute of hdb
+            hdb = FakeHdb(np.zeros(X.shape[0],))
+            labels = [0]
+            return hdb, labels
+
+        hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
+        labels = list(set(hdb.labels_))
+
+        if raise_error:
+            Event.__check_single_cluster(hdb, labels, hdbscan_kw)
+
+        return hdb, labels
+
+    @staticmethod
+    def __check_single_cluster(hdb, labels, hdbscan_kw, warn=False):
+        if max(labels) != 0:
+            msg = 'Found more than one cluster: {}'.format(labels)
+            msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
+            if warn:
+                warnings.warn(msg)
+            else:
+                raise ValueError(msg)
+
+        noise_count = np.count_nonzero(hdb.labels_ == -1)
+        n = len(hdb.labels_)
+        if noise_count > 0.2*n:
+            msg = 'More than 20% of points are classified as noise:'
+            msg += ' ({}/{})'.format(noise_count, n)
+            msg += '\nChange cluster parameters: {}'.format(hdbscan_kw)
+            if warn:
+                warnings.warn(msg)
+            else:
+                raise ValueError(msg)
+
+    def _plot_stationary_clusters(self, lidar_index,
+                                  hdbscan_kw=None, ax=None, **fig_kw):
+        """Plot stationary clusters for a single lidar frame. """
+        # stationary
+        X = self._compressed_points(lidar_index, True)
+
+        if hdbscan_kw is None:
+            hdbscan_kw = {
+                'min_cluster_size': 30,
+                'min_samples': 15,
+                'metric': 'euclidean',
+                'allow_single_cluster': True,
+            }
+
+            # try clustering to find obstacle
+            try:
+                hdb, labels = self.__get_single_cluster(X, hdbscan_kw)
+            except ValueError:
+                hdbscan_kw['min_cluster_size'] = 15
+                hdbscan_kw['min_samples'] = 10
+                hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
+                                                        raise_error=False)
+        else:
+            hdb, labels = self.__get_single_cluster(X, hdbscan_kw,
+                                                    raise_error=False)
+        self.__check_single_cluster(hdb, labels, hdbscan_kw, warn=True)
+
+        noise_color = 'dimgray'
+        n_colors = len(labels) - 1
+        if n_colors <= 10:
+            colors = sns.color_palette('tab10', 10)
+        else:
+            colors = sns.husl_palette(n_colors, l=0.7)
+
+        if ax is None:
+            fig, ax = plt.subplots(**fig_kw)
+        else:
+            fig = ax.get_figure()
+
+        for i in labels:
+            index = hdb.labels_ == i
+            if i == -1:
+                color = noise_color
+                label = 'stationary noise'
+            else:
+                color = colors[i]
+                label = 'obstacle'
+            ax.scatter(*X[index].T, color=color, label=label)
+        ax.legend()
+
+        return fig, ax
 
     def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
@@ -264,7 +587,6 @@ class Event(Trial):
         return fig, ax
 
 
-
 class Trial2(Trial):
     def __init__(self, bicycle_data, lidar_data, period, invalid_bb=None):
             super().__init__(bicycle_data, period)
@@ -292,9 +614,8 @@ class Trial2(Trial):
             if not hasattr(invalid_bb, '__iter__'):
                 invalid_bb = [invalid_bb]
 
-            for m in invalid_bb:
-                bbminus = lidar_data.cartesian(**m)[0].count(axis=1)
-                mask -= bbminus
+            for bbminus in invalid_bb:
+                mask -= lidar_data.cartesian(**bbminus)[0].count(axis=1)
         return mask > 1
 
     @staticmethod
@@ -372,7 +693,7 @@ class Trial2(Trial):
         exit_time = None
         exit_clumps = np.ma.extras._ezclump(exit_mask > 0)
         for clump in exit_clumps:
-            t = self.lidar.time[clump.stop]
+            t = self.lidar.time[clump.stop - 1] # make exit time inclusive
             if (t >= self.bicycle.time[evt_index[0]] and
                 t < self.bicycle.time[evt_index[1]]):
                 exit_time = t

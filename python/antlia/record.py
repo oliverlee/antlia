@@ -300,6 +300,7 @@ class Record(object):
 
         trials = []
         for i0, i1 in trial_indices:
+            i1 += 1 # add extra index to improve viewing of braking in plots
             time0 = self.bicycle.time[i0]
             time1 = self.bicycle.time[i1]
             j0 = self.lidar.frame_index(time0)[0]
@@ -321,7 +322,6 @@ class Record(object):
                     'trials.').format(len(trials), 18)
             warnings.warn(msg, UserWarning)
         self.trials = trials
-
 
     def _calculate_trial_ranges(self, trial_number):
         """In a trial, we normally observe 3 phases. We describe each phase as:
