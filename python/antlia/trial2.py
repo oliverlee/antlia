@@ -32,7 +32,7 @@ FakeHdb = namedtuple(
 
 SteeringIdentificationCase = namedtuple(
         'SteeringIdentificationCase',
-        ['attenuation', 'data', 'minima', 'maxima', 'inflections',
+        ['attenuation', 'data', 'freq', 'xf', 'minima', 'maxima', 'inflections',
          'cutoff', 'section', 'score'])
 
 ENTRY_BB = {
@@ -54,17 +54,19 @@ VALID_BB = {
 
 
 class SteeringIdentification(object):
-    def __init__(self, attenuation, pattern, event):
+    def __init__(self, attenuation, pattern):
         self.attenuation = attenuation
         self.pattern = pattern
         self.cases = []
 
-    def add_case(self, attenuation_value, data, minima, maxima, inflections,
-                 cutoff, section, score):
+    def add_case(self, attenuation_value, data, freq, xf,
+                 minima, maxima, inflections, cutoff, section, score):
         assert np.any(np.isin(attenuation_value, self.attenuation))
         self.cases.append(SteeringIdentificationCase(
             attenuation_value,
             data,
+            freq,
+            xf,
             minima,
             maxima,
             inflections,
@@ -517,9 +519,8 @@ class Event(Trial):
             test_patterns = [pattern]
 
         # save identification data
-        self.si = SteeringIdentification(
-                attenuation.copy(),
-                list(test_patterns))
+        self.si = SteeringIdentification(attenuation.copy(),
+                                         list(test_patterns))
 
         best_a = None
         for a in attenuation:
@@ -612,10 +613,11 @@ class Event(Trial):
 
             if best_section is None:
                 # didn't find acceptable section for bandpass attenuation value
-                self.si.add_case(a, sa, sa_min, sa_max, sa_inf, f, None, None)
+                self.si.add_case(a, sa, freq, xf, sa_min, sa_max, sa_inf, f,
+                                 None, None)
                 continue
             else:
-                self.si.add_case(a, sa, sa_min, sa_max, sa_inf, f,
+                self.si.add_case(a, sa, freq, xf, sa_min, sa_max, sa_inf, f,
                                  best_section[0], best_section[1])
 
             if best_a is None or best_section[1] > best_a[1]:
@@ -738,6 +740,122 @@ class Event(Trial):
         handles[0], handles[1] = handles[1], handles[0]
         labels[0], labels[1] = labels[1], labels[0]
         ax[1].legend(handles, labels)
+
+        return fig, ax
+
+    def plot_steer_identification(self, steerid_kw=None, ax=None, **fig_kw):
+        if self.type != EventType.Overtaking:
+            raise TypeError('Incorrect EventType')
+        if self.si is None:
+            if steerid_kw is None:
+                steerid_kw = {}
+            self._identify_steer_slice(**steerid_kw)
+
+        if ax is None:
+            fig, ax = plt.subplots(4, 1, sharex=False, **fig_kw)
+        else:
+            assert len(ax) == 4
+            fig = ax[0].get_figure()
+
+        n = len(self.si.cases)
+        if n < 11:
+            colors = sns.color_palette('tab10', n)
+        else:
+            colors = sns.husl_palette(n, l=.7)
+
+        lines = []
+        case_1_shift = 0.025
+        case_2_shift = 0.25
+        for i, case in enumerate(self.si.cases):
+            # steer angle fft plot
+            label = 'attenuation = {}'.format(case.attenuation)
+            ax[0].plot(case.freq, case.xf, color=colors[i], label=label)
+
+            minima = scipy.signal.argrelmin(case.xf)[0]
+            ax[0].scatter(case.freq[minima], case.xf[minima],
+                          marker='v', color=colors[i])
+
+            # filtered steer angle plot
+            label += ', fc = [{:0.3f}, {:0.3f}] Hz'.format(*case.freq)
+            if case.score is not None:
+                label += ', span = {}'.format(case.score)
+            lines.extend(ax[1].plot(self.bicycle.time,
+                                    case.data + case_1_shift*(i + 1),
+                                    label=label, color=colors[i]))
+            ax[1].scatter(self.bicycle.time[case.maxima],
+                          case.data[case.maxima] + case_1_shift*(i + 1),
+                          marker='^', color=colors[i])
+            ax[1].scatter(self.bicycle.time[case.minima],
+                          case.data[case.minima] + case_1_shift*(i + 1),
+                          marker='v', color=colors[i])
+            ax[1].scatter(self.bicycle.time[case.inflections],
+                          case.data[case.inflections] + case_1_shift*(i + 1),
+                          marker='d', color=colors[i])
+
+            try:
+                t0, t1 = self.bicycle.time[[case.section[0], case.section[-1]]]
+            except IndexError:
+                pass
+            else:
+                ax[1].axvspan(t0, t1, alpha=0.1, color=colors[i])
+
+                # trajectory scatter plot
+                z = self.lidar.cartesianz()[2]
+                z[(z < t0) | (z > t1)] = np.ma.masked
+                z.mask |= self.bb_mask | self.stationary_mask
+                x = np.ma.masked_where(z.mask, self.x, copy=True)
+                y = np.ma.masked_where(z.mask, self.y, copy=True)
+                ax[2].scatter(x, y + case_2_shift*(i + 1),
+                              marker='.', color=colors[i], alpha=0.1)
+
+        best_score = None
+        for i, case in enumerate(self.si.cases):
+            if best_score is None or case.score > best_score[0]:
+                best_score = (case.score, i)
+        lines[best_score[1]].set_linewidth(3)
+
+        ax[0].set_title('steer angle FFT chebwin window')
+        ax[0].set_xlabel('frequency [Hz]')
+        ax[0].set_ylabel('amplitude')
+        ax[0].legend(loc='upper right')
+        ax[0].set_ylim((-0.001, 0.02))
+
+        sa_raw = self.bicycle['steer angle'].copy()
+        sa_raw -= sa_raw.mean()
+        ax[1].plot(self.bicycle.time, sa_raw,
+                   label='measured steer angle (mean subtracted)',
+                   color='black', alpha=0.5, zorder=-1)
+        ax[1].set_title('filtered steer angle')
+        ax[1].set_xlabel('time [s]')
+        ax[1].set_ylabel('steer angle (case shifted) [rad]')
+        ax[1].legend(loc='upper left')
+
+        ax[2].scatter(self.x, self.y,
+                      marker='.', color='black', alpha=0.11,
+                      zorder=-1)
+        ax[2].set_title('lidar scans (section bounds)')
+        ax[2].set_xlabel('x-coordinate [m]')
+        ax[2].set_ylabel('y-coordinate [m]')
+
+        # add 3d cluster scatter plot
+        ax[3].get_xaxis().set_visible(False)
+        ax[3].get_yaxis().set_visible(False)
+        ax[3] = fig.add_subplot(4, 1, 4, projection='3d')
+        self.plot_clusters(ax=ax[3])
+
+        z0 = self.z.min()
+        z1 = self.z.max()
+        t0 = self.lidar.time[0]
+        t1 = self.lidar.time[-1]
+
+        tstart = self.bicycle.time[self.si.cases[best_score[1]].section[0]]
+        tstop = self.bicycle.time[self.si.cases[best_score[1]].section[-1]]
+        zstart, zstop = np.interp([tstart, tstop], [t0, t1], [z0, z1])
+        index = (self.z < zstart) | (self.z > zstop)
+        x = np.ma.masked_where(index, self.x, copy=True)
+        y = np.ma.masked_where(index, self.y, copy=True)
+        z = np.ma.masked_where(index, self.z, copy=True)
+        ax[3].scatter(x, y, z, s=10, color=colors[best_score[1]], alpha=0.5)
 
         return fig, ax
 
