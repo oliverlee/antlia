@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from enum import Enum
 from collections import namedtuple
+import heapq
+import itertools
 import warnings
 
 import numpy as np
@@ -28,6 +30,11 @@ FakeHdb = namedtuple(
         'FakeHdb',
         ['labels_'])
 
+SteeringIdentificationCase = namedtuple(
+        'SteeringIdentificationCase',
+        ['attenuation', 'data', 'freq', 'xf', 'minima', 'maxima', 'inflections',
+         'cutoff', 'section', 'score'])
+
 ENTRY_BB = {
     'xlim': (20, 30),
     'ylim': (2.5, 3.5)
@@ -44,6 +51,28 @@ VALID_BB = {
     'xlim': (-20, 60),
     'ylim': (1.0, 3.5)
 }
+
+
+class SteeringIdentification(object):
+    def __init__(self, attenuation, pattern):
+        self.attenuation = attenuation
+        self.pattern = pattern
+        self.cases = []
+
+    def add_case(self, attenuation_value, data, freq, xf,
+                 minima, maxima, inflections, cutoff, section, score):
+        assert np.any(np.isin(attenuation_value, self.attenuation))
+        self.cases.append(SteeringIdentificationCase(
+            attenuation_value,
+            data,
+            freq,
+            xf,
+            minima,
+            maxima,
+            inflections,
+            cutoff,
+            section,
+            score))
 
 
 class EventType(Enum):
@@ -73,6 +102,10 @@ class Event(Trial):
             self.stationary_mask = None
             self.stationary_count = None
             self._identify_stationary(invalid_bb=invalid_bb)
+
+            self.si = None
+            self.steer_slice = None # bicycle time
+            #self._identify_steer_slice() # don't run automatically
 
     def _identify_stationary(self, min_zspan=0.7, zscale=0.0005,
                              hdbscan_kw=None, invalid_bb=None):
@@ -470,6 +503,130 @@ class Event(Trial):
 
         return fig, ax
 
+    def _identify_steer_slice(self, pattern=None, attenuation=None,
+                              min_allowed_freq=0.40):
+        if self.type != EventType.Overtaking:
+            raise TypeError('Incorrect EventType')
+
+        if attenuation is None:
+            attenuation = np.arange(35, 100, 10)
+
+        # create windows of pattern length
+        if pattern is None:
+            test_patterns = [(0, -1, 0, 1, 0, -1, 0),
+                             (0, -1, 0, 1, 0)]
+        else:
+            test_patterns = [pattern]
+
+        # save identification data
+        self.si = SteeringIdentification(attenuation.copy(),
+                                         list(test_patterns))
+
+        best_a = None
+        for a in attenuation:
+            freq, xf = self._chebwin_fft(self.bicycle['steer angle'],
+                                         self.period,
+                                         attenuation=a,
+                                         max_freq=2)
+            minima = scipy.signal.argrelmin(xf)[0]
+            if len(minima) < 2:
+                # Unable to detect minima for this attenuation value
+                continue
+
+            f = freq[minima[[0, 1]]]
+
+            if f[0] > min_allowed_freq:
+                msg = 'First frequency minimum exceeds {}'.format(
+                        min_allowed_freq)
+                msg += ' and has been replaced with 0.1'
+                warnings.warn(msg)
+                f[1] = f[0]
+                f[0] = 0.1
+
+            sa = self._butter_bandpass_filter(self.data['steer angle'],
+                                              f.copy(),
+                                              1/self.period)
+
+            # get max, min, inflection points for bandpass filtered steer angle
+            sa_max = scipy.signal.argrelmax(sa)[0]
+            sa_min = scipy.signal.argrelmin(sa)[0]
+            dsa = np.diff(sa)
+            sa_inf = np.concatenate((scipy.signal.argrelmax(dsa)[0],
+                                     scipy.signal.argrelmin(dsa)[0]))
+
+            # put max, min, inf in index order
+            q = []
+            for item in sa_max:
+                heapq.heappush(q, (item, 1))
+            for item in sa_min:
+                heapq.heappush(q, (item, -1))
+            for item in sa_inf:
+                heapq.heappush(q, (item, 0))
+
+            sorted_q = []
+            while q:
+                sorted_q.append(heapq.heappop(q))
+
+            # reduce runs of 3 to 1 (only happens with inflection points)
+            q = []
+            for item in sorted_q:
+                q.append(item)
+
+                if len(q) > 2:
+                    if q[-1][1] == q[-2][1] == q[-3][1]:
+                        q.pop(-3)
+                        q.pop(-1)
+
+            sections = []
+            # filter sections that match pattern
+            for p in test_patterns:
+                # create window iterator
+                it = itertools.tee(q, len(p))
+                for n, l in enumerate(it):
+                    for _ in range(n):
+                        next(l, None)
+                window = zip(*it)
+
+                # filter pattern
+                for w in window:
+                    w0, w1 = list(zip(*w))
+                    if w1 == p:
+                        sections.append(w0)
+
+            # filter sections that span the width of the obstacle
+            def span_obs(s):
+                t0, t1 = self.bicycle.time[[s[0], s[-1]]]
+                z = self.lidar.cartesianz()[2]
+                z[(z < t0) | (z > t1)] = np.ma.masked
+                z.mask |= self.bb_mask | self.stationary_mask
+                x = np.ma.masked_where(z.mask, self.x, copy=True)
+                xlim = OBSTACLE_BB['xlim']
+                return x.max() > xlim[1] and x.min() < xlim[0]
+            sections = filter(span_obs, sections)
+
+            # define best section to have the longest time duration
+            best_section = None
+            for s in sections:
+                score = s[-1] - s[0]
+                if best_section is None or score > best_section[1]:
+                    best_section = (s, score)
+
+            if best_section is None:
+                # didn't find acceptable section for bandpass attenuation value
+                self.si.add_case(a, sa, freq, xf, sa_min, sa_max, sa_inf, f,
+                                 None, None)
+                continue
+            else:
+                self.si.add_case(a, sa, freq, xf, sa_min, sa_max, sa_inf, f,
+                                 best_section[0], best_section[1])
+
+            if best_a is None or best_section[1] > best_a[1]:
+                best_a = (best_section[0], best_section[1], a)
+
+        msg = 'Unable to determine steering metrics for event'
+        assert best_a is not None, msg
+        self.steer_slice = slice(best_a[0][0], best_a[0][-1] + 1)
+
     def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
             fig, ax = plt.subplots(subplot_kw={'projection': '3d'}, **fig_kw)
@@ -583,6 +740,122 @@ class Event(Trial):
         handles[0], handles[1] = handles[1], handles[0]
         labels[0], labels[1] = labels[1], labels[0]
         ax[1].legend(handles, labels)
+
+        return fig, ax
+
+    def plot_steer_identification(self, steerid_kw=None, ax=None, **fig_kw):
+        if self.type != EventType.Overtaking:
+            raise TypeError('Incorrect EventType')
+        if self.si is None:
+            if steerid_kw is None:
+                steerid_kw = {}
+            self._identify_steer_slice(**steerid_kw)
+
+        if ax is None:
+            fig, ax = plt.subplots(4, 1, sharex=False, **fig_kw)
+        else:
+            assert len(ax) == 4
+            fig = ax[0].get_figure()
+
+        n = len(self.si.cases)
+        if n < 11:
+            colors = sns.color_palette('tab10', n)
+        else:
+            colors = sns.husl_palette(n, l=.7)
+
+        lines = []
+        case_1_shift = 0.025
+        case_2_shift = 0.25
+        for i, case in enumerate(self.si.cases):
+            # steer angle fft plot
+            label = 'attenuation = {}'.format(case.attenuation)
+            ax[0].plot(case.freq, case.xf, color=colors[i], label=label)
+
+            minima = scipy.signal.argrelmin(case.xf)[0]
+            ax[0].scatter(case.freq[minima], case.xf[minima],
+                          marker='v', color=colors[i])
+
+            # filtered steer angle plot
+            label += ', fc = [{:0.3f}, {:0.3f}] Hz'.format(*case.freq)
+            if case.score is not None:
+                label += ', span = {}'.format(case.score)
+            lines.extend(ax[1].plot(self.bicycle.time,
+                                    case.data + case_1_shift*(i + 1),
+                                    label=label, color=colors[i]))
+            ax[1].scatter(self.bicycle.time[case.maxima],
+                          case.data[case.maxima] + case_1_shift*(i + 1),
+                          marker='^', color=colors[i])
+            ax[1].scatter(self.bicycle.time[case.minima],
+                          case.data[case.minima] + case_1_shift*(i + 1),
+                          marker='v', color=colors[i])
+            ax[1].scatter(self.bicycle.time[case.inflections],
+                          case.data[case.inflections] + case_1_shift*(i + 1),
+                          marker='d', color=colors[i])
+
+            try:
+                t0, t1 = self.bicycle.time[[case.section[0], case.section[-1]]]
+            except IndexError:
+                pass
+            else:
+                ax[1].axvspan(t0, t1, alpha=0.1, color=colors[i])
+
+                # trajectory scatter plot
+                z = self.lidar.cartesianz()[2]
+                z[(z < t0) | (z > t1)] = np.ma.masked
+                z.mask |= self.bb_mask | self.stationary_mask
+                x = np.ma.masked_where(z.mask, self.x, copy=True)
+                y = np.ma.masked_where(z.mask, self.y, copy=True)
+                ax[2].scatter(x, y + case_2_shift*(i + 1),
+                              marker='.', color=colors[i], alpha=0.1)
+
+        best_score = None
+        for i, case in enumerate(self.si.cases):
+            if best_score is None or case.score > best_score[0]:
+                best_score = (case.score, i)
+        lines[best_score[1]].set_linewidth(3)
+
+        ax[0].set_title('steer angle FFT chebwin window')
+        ax[0].set_xlabel('frequency [Hz]')
+        ax[0].set_ylabel('amplitude')
+        ax[0].legend(loc='upper right')
+        ax[0].set_ylim((-0.001, 0.02))
+
+        sa_raw = self.bicycle['steer angle'].copy()
+        sa_raw -= sa_raw.mean()
+        ax[1].plot(self.bicycle.time, sa_raw,
+                   label='measured steer angle (mean subtracted)',
+                   color='black', alpha=0.5, zorder=-1)
+        ax[1].set_title('filtered steer angle')
+        ax[1].set_xlabel('time [s]')
+        ax[1].set_ylabel('steer angle (case shifted) [rad]')
+        ax[1].legend(loc='upper left')
+
+        ax[2].scatter(self.x, self.y,
+                      marker='.', color='black', alpha=0.11,
+                      zorder=-1)
+        ax[2].set_title('lidar scans (section bounds)')
+        ax[2].set_xlabel('x-coordinate [m]')
+        ax[2].set_ylabel('y-coordinate [m]')
+
+        # add 3d cluster scatter plot
+        ax[3].get_xaxis().set_visible(False)
+        ax[3].get_yaxis().set_visible(False)
+        ax[3] = fig.add_subplot(4, 1, 4, projection='3d')
+        self.plot_clusters(ax=ax[3])
+
+        z0 = self.z.min()
+        z1 = self.z.max()
+        t0 = self.lidar.time[0]
+        t1 = self.lidar.time[-1]
+
+        tstart = self.bicycle.time[self.si.cases[best_score[1]].section[0]]
+        tstop = self.bicycle.time[self.si.cases[best_score[1]].section[-1]]
+        zstart, zstop = np.interp([tstart, tstop], [t0, t1], [z0, z1])
+        index = (self.z < zstart) | (self.z > zstop)
+        x = np.ma.masked_where(index, self.x, copy=True)
+        y = np.ma.masked_where(index, self.y, copy=True)
+        z = np.ma.masked_where(index, self.z, copy=True)
+        ax[3].scatter(x, y, z, s=10, color=colors[best_score[1]], alpha=0.5)
 
         return fig, ax
 

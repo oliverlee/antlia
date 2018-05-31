@@ -16,7 +16,12 @@ class Trial(object):
     @staticmethod
     def _butter_bandpass_filter(x, fc, fs):
         order = 3
-        wn = np.array([0.1, fc]) / (0.5*fs)
+        if np.isscalar(fc):
+            wn = np.array([0.1, fc])
+        else:
+            wn = fc
+            assert len(wn) == 2
+        wn /= (0.5*fs)
         b, a = scipy.signal.butter(order, wn, btype='bandpass')
         return scipy.signal.filtfilt(b, a, x)
 
