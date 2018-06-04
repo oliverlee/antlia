@@ -662,6 +662,19 @@ class Event(Trial):
 
         return fig, ax
 
+    def calculate_trajectory(self, savgol_kw=None):
+        x = self.x.copy()
+        y = self.y.copy()
+        x.mask = self.stationary_mask | self.bb_mask
+        y.mask = self.stationary_mask | self.bb_mask
+
+        xm = x.mean(axis=1)
+        ym = y.mean(axis=1)
+
+        xsg = scipy.signal.savgol_filter(xm, window_length, polyorder)
+        ysg = scipy.signal.savgol_filter(ym, window_length, polyorder)
+        return (xsg, ysg)
+
     def plot_trajectory(self, ax=None, **fig_kw):
         if ax is None:
             fig, ax = plt.subplots(2, 1, sharex=False, **fig_kw)
