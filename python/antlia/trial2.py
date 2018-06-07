@@ -35,6 +35,10 @@ SteeringIdentificationCase = namedtuple(
         ['attenuation', 'data', 'freq', 'xf', 'minima', 'maxima', 'inflections',
          'cutoff', 'section', 'score'])
 
+SteerEventSinusoidFitParameters = namedtuple(
+        'SteerEventSinusoidFitParameters',
+        ['amplitude', 'frequency', 'phase', 'mean'])
+
 ENTRY_BB = {
     'xlim': (20, 30),
     'ylim': (2.5, 3.5)
@@ -626,6 +630,60 @@ class Event(Trial):
         msg = 'Unable to determine steering metrics for event'
         assert best_a is not None, msg
         self.steer_slice = slice(best_a[0][0], best_a[0][-1] + 1)
+
+    def _calculate_steer_event_fit(self):
+        if self.type != EventType.Overtaking:
+            raise TypeError('Incorrect EventType')
+        if self.si is None:
+            raise ValueError('Steer slice must first be identified')
+
+        def initial_fit_parameters(t, y):
+            # best fit sinusoid
+            ampl = -np.abs(y).max()
+            freq = 1/(2*(t[-1] - t[0]))
+            phase = -t[0]
+            mean = 0
+            return ampl, freq, phase, mean
+
+        def optimize_func(y):
+            return lambda x: x[0]*np.sin(2*np.pi*x[1]*(t + x[2])) + x[3] - y
+
+        def estimate_fit_parameters(t, y):
+            return scipy.optimize.leastsq(
+                    optimize_func(y),
+                    initial_fit_parameters(t, y))[0]
+
+        case = None
+        for c in self.si.cases:
+            if case is None or c.score > case.score:
+                case = c
+
+        # Get indices for first turn in the steer event
+        # this corresponds to (inflect, minimum, inflect).
+        # This may not correspond to case indices if runs of
+        # inflection points were reduced.
+        case_inflections = sorted(
+                [item for item in case.inflections
+                 if item >= case.section[0] and item <= case.section[-1]])
+        if len(case_inflections) > 4:
+            # Handle cases where inflection points runs were reduced
+            i0 = [item for item in case_inflections
+                  if item < case.section[1]][-1]
+            i1 = [item for item in case_inflections
+                  if item > case.section[1]][0]
+        else:
+            i0 = case.section[0]
+            i1 = case.section[2]
+
+        # Get corresponding time and filtered steer angle slice.
+        index = slice(i0, i1 + 1)
+        t = self.bicycle['time'][index]
+        y = case.data[index]
+        estimate = estimate_fit_parameters(t, y)
+        y_hat = optimize_func(y)(estimate) + y
+
+        fit_parameters = SteerEventSinusoidFitParameters(*estimate)
+        return fit_parameters, np.vstack((t, y, y_hat)).T
 
     def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
