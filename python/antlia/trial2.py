@@ -8,6 +8,7 @@ import warnings
 import numpy as np
 import scipy.signal
 import scipy.spatial
+import scipy.stats
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
@@ -17,6 +18,7 @@ from antlia import dtc
 import antlia.filter as ff
 from antlia.trial import Trial
 import antlia.util as util
+import antlia.plot_braking as braking
 
 EventDetectionData = namedtuple(
         'EventDetectionData',
@@ -34,6 +36,30 @@ SteeringIdentificationCase = namedtuple(
         'SteeringIdentificationCase',
         ['attenuation', 'data', 'freq', 'xf', 'minima', 'maxima', 'inflections',
          'cutoff', 'section', 'score'])
+
+SteerEventSinusoidFitParameters = namedtuple(
+        'SteerEventSinusoidFitParameters',
+        ['amplitude',
+         'frequency',
+         'phase',
+         'mean']) # TODO add all information from
+                  # steering identification case object?
+
+# braking identification done in a single step
+BrakeEventLinearFitParameters = namedtuple(
+        'BrakeEventLinearFitParameters',
+        ['average_window_size',
+         'braking_threshold',
+         'slice_minsize',
+         'filtered_velocity',
+         'filtered_acceleration',
+         'braking_slice',
+         'lockup_mask',
+         'linregress_slope',
+         'linregress_intercept',
+         'linregress_rvalue',
+         'linregress_pvalue',
+         'linregress_stderr'])
 
 ENTRY_BB = {
     'xlim': (20, 30),
@@ -645,6 +671,43 @@ class Event(Trial):
         length = len(case.section)
         return duration, amplitud/e
 
+    def _calculate_brake_event_fit(self,
+                                   window_size=55,
+                                   braking_threshold=0.1,
+                                   min_size=75):
+        t = self.bicycle['time']
+        v = self.bicycle['speed']
+
+        filtered_velocity = ff.moving_average(v, window_size, window_size/2)
+        filtered_acceleration = ff.moving_average(
+                self.bicycle['accelerometer x'], window_size, window_size/2)
+
+        braking_slice = braking.get_trial_braking_indices(
+            filtered_acceleration, braking_threshold, min_size)[0]
+
+        # determine if wheel lockup occurs
+        lockup_mask = ((v[braking_slice] < 0.2) &
+                       (filtered_acceleration[braking_slice] > 2.5))
+
+        # best-fit line metrics
+        slope, intercept, r_value, p_value, stderr = scipy.stats.linregress(
+                t[braking_slice][~lockup_mask],
+                v[braking_slice][~lockup_mask])
+
+        fitparams = BrakeEventLinearFitParameters(window_size,
+                                                  braking_threshold,
+                                                  min_size,
+                                                  filtered_velocity,
+                                                  filtered_acceleration,
+                                                  braking_slice,
+                                                  lockup_mask,
+                                                  slope,
+                                                  intercept,
+                                                  r_value,
+                                                  p_value,
+                                                  stderr)
+        return fitparams
+
     def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
             fig, ax = plt.subplots(subplot_kw={'projection': '3d'}, **fig_kw)
@@ -679,6 +742,50 @@ class Event(Trial):
 
 
         return fig, ax
+
+    def trajectory(self, mode=None):
+        # stationary points
+        ax[0].scatter(self.x.data[self.stationary_mask & ~self.bb_mask],
+                      self.y.data[self.stationary_mask & ~self.bb_mask],
+                      s=5, marker='x', color='black',
+                      label='stationary points')
+
+        x = self.x.copy()
+        y = self.y.copy()
+        x.mask = self.stationary_mask | self.bb_mask
+        y.mask = self.stationary_mask | self.bb_mask
+
+        # non-stationary points
+        ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
+                      label='non-stationary points')
+
+        # trajectory points
+        xm = x.mean(axis=1)
+        ym = y.mean(axis=1)
+
+        if mode is None or mode == 'raw':
+            return xm, ym
+
+        # interpolated trajectory
+        xm[xm.mask] = np.interp(
+                np.where(xm.mask)[0], np.where(~xm.mask)[0], xm[~xm.mask])
+        ym[ym.mask] = np.interp(
+                np.where(ym.mask)[0], np.where(~ym.mask)[0], ym[~ym.mask])
+
+        if mode == 'interp':
+            return xm, ym
+
+        # butterworth filtered trajectory
+        if mode == 'butter':
+            order = 4
+            fc = 1.5
+            fs = 20
+            wn = fc / (0.5*fs)
+            b, a = scipy.signal.butter(order, wn, btype='lowpass')
+            butterf = lambda x: scipy.signal.filtfilt(b, a, x)
+            return butterf(xm), butterf(ym)
+
+        raise ValueError('Unhandled case for mode {}:'.format(mode))
 
     def plot_trajectory(self, ax=None, **fig_kw):
         if ax is None:

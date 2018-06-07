@@ -52,7 +52,7 @@ def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
                 range_clumps[0] = slice(clump1.start, clump2.stop)
             else:
                 merged_clumps.append(clump1)
-    merged_clumps = [(clump.start, clump.stop - 1) for clump in merged_clumps
+    merged_clumps = [clump for clump in merged_clumps
                      if clump.stop - clump.start > min_size]
     if not merged_clumps:
         msg = 'Braking not detected. Use different parameters to specify '
@@ -60,14 +60,14 @@ def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
         raise ValueError(msg)
 
     # find the 'largest' range by simplified integration
-    largest = None
+    largest_clump = None
     for clump in merged_clumps:
-        if largest is None:
-            largest = clump
-        elif sum(accel[slice(*clump)]) > sum(accel[slice(*largest)]):
-            largest = clump
+        if largest_clump is None:
+            largest_clump = clump
+        elif sum(accel[clump]) > sum(accel[largest_clump]):
+            largest_clump = clump
 
-    return largest, merged_clumps
+    return largest_clump, merged_clumps
 
 
 def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
@@ -80,9 +80,10 @@ def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
                                           window_size, window_size/2)
     filtered_acceleration = ff.moving_average(trial['accelerometer x'],
                                               window_size, window_size/2)
-    braking_range, _ = get_trial_braking_indices(
-            filtered_acceleration, braking_threshold, min_size)
-    b0, b1 = braking_range
+    b0, b1 = braking_range = get_trial_braking_indices(filtered_acceleration,
+                                                       braking_threshold,
+                                                       min_size)[0]
+    b1 -= 1
 
     # determine if wheel lockup occurs
     # look at raw speed and filtered acceleration
@@ -163,11 +164,11 @@ def plot_rider_velocities(recs, rider_id, **kwargs):
         largest_range, all_ranges = get_trial_braking_indices(af)
         for clump in all_ranges:
             ax.axvspan(t[clump.start],
-                       t[clump.stop],
+                       t[clump.stop - 1],
                        color=colors[5], alpha=0.2)
         if largest_range is not None:
             ax.axvspan(t[largest_range.start],
-                       t[largest_range.stop],
+                       t[largest_range.stop - 1],
                        color=colors[5], alpha=0.4)
     return fig, axes
 
