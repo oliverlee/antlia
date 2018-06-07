@@ -51,6 +51,7 @@ BrakeEventLinearFitParameters = namedtuple(
         ['average_window_size',
          'braking_threshold',
          'slice_minsize',
+         'signal_time',
          'filtered_velocity',
          'filtered_acceleration',
          'braking_slice',
@@ -697,6 +698,7 @@ class Event(Trial):
         fitparams = BrakeEventLinearFitParameters(window_size,
                                                   braking_threshold,
                                                   min_size,
+                                                  t,
                                                   filtered_velocity,
                                                   filtered_acceleration,
                                                   braking_slice,
@@ -745,19 +747,10 @@ class Event(Trial):
 
     def trajectory(self, mode=None):
         # stationary points
-        ax[0].scatter(self.x.data[self.stationary_mask & ~self.bb_mask],
-                      self.y.data[self.stationary_mask & ~self.bb_mask],
-                      s=5, marker='x', color='black',
-                      label='stationary points')
-
         x = self.x.copy()
         y = self.y.copy()
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
-
-        # non-stationary points
-        ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
-                      label='non-stationary points')
 
         # trajectory points
         xm = x.mean(axis=1)
