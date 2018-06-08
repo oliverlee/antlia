@@ -1025,12 +1025,26 @@ class Trial2(Trial):
         return mask > 1
 
     @staticmethod
-    def event_indices(mask):
+    def event_indices(mask, partial_clumps=False):
         edges = np.diff(mask.astype(int))
         rising = np.where(edges > 0)[0]
         falling = np.where(edges < 0)[0]
 
-        assert len(rising) == len(falling)
+        if not partial_clumps:
+            assert len(rising) == len(falling)
+        else:
+            assert len(rising) > 0
+            assert len(falling) > 0
+
+            if len(rising) == len(falling) + 1:
+                rising = rising[:-1]
+            elif len(falling) == len(rising) + 1:
+                falling = falling[1:]
+            elif len(falling) == len(rising):
+                pass
+            else:
+                raise ValueError('Unexpected number of edges')
+
         return list(zip(rising, falling))
 
     def _detect_event(self, invalid_bb=None):
@@ -1050,24 +1064,38 @@ class Trial2(Trial):
                     lidar.cartesian() for an area to ignore for event detection.
                     This is used in the event of erroneous lidar data.
         """
-        mask_a = Trial2.mask_a(self.bicycle)
-        mask_b = Trial2.mask_b(self.lidar, invalid_bb)
+        # speed sensor breaks during trial 5 of rider 8
+        r8t5 = self.bicycle.time[0] == 346.648266
+        is_valid_speed = (np.count_nonzero(self.bicycle.speed > 2) > 1000 and
+                       not r8t5)
 
-        # interpolate mask_b from lidar time to bicycle time
-        mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
+        if is_valid_speed:
+            # speed sensor working
+            mask_a = Trial2.mask_a(self.bicycle)
+            mask_b = Trial2.mask_b(self.lidar, invalid_bb)
 
-        mask_ab = util.debounce(np.logical_and(mask_a, mask_b))
-        evti = Trial2.event_indices(mask_ab)
+            # interpolate mask_b from lidar time to bicycle time
+            mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
 
-        # filter out events with a minimum size and minimum average speed
-        MIN_TIME_DURATION = int(5.5 * 125) # in samples
-        MIN_AVG_SPEED = 2 # in m/s
-        evti = [e for e in evti
-                if ((e[1] - e[0] > MIN_TIME_DURATION) and
-                    (np.mean(self.bicycle.speed[e[0]:e[1]]) > MIN_AVG_SPEED))]
+            mask_ab = util.debounce(np.logical_and(mask_a, mask_b))
 
-        assert len(evti) > 0, "unable to detect event for this trial"
-        evt_index = evti[-1]
+            evti = Trial2.event_indices(mask_ab)
+
+            # filter out events with a minimum size and minimum average speed
+            MIN_TIME_DURATION = int(5.5 * 125) # in samples
+            MIN_AVG_SPEED = 2 # in m/s
+
+            evti = [e for e in evti
+                    if ((e[1] - e[0] > MIN_TIME_DURATION) and
+                        (np.mean(self.bicycle.speed[e[0]:e[1]]) > MIN_AVG_SPEED))]
+
+            assert len(evti) > 0, "unable to detect event for this trial"
+            evt_index = evti[-1]
+        else:
+            mask_a = np.zeros(self.bicycle.shape, dtype=bool)
+            mask_b = np.zeros(self.bicycle.shape, dtype=bool)
+            evti = [None]
+            evt_index = (0, -1)
 
         # reduce region using entry and exit bounding box detection
         entry_mask = self.lidar.cartesian(**ENTRY_BB)[0].count(axis=1) > 1
