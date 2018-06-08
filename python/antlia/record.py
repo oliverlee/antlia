@@ -16,7 +16,6 @@ import seaborn as sns
 from antlia.util import reduce_runs
 from antlia.trial import Trial
 from antlia import trial2
-from antlia.trial2 import Trial2
 from antlia.lidar import LidarRecord
 from antlia.dtype import LIDAR_ANGLES, LIDAR_RECORD_DTYPE, LIDAR_CONVERTED_DTYPE
 
@@ -311,10 +310,10 @@ class Record(object):
             bicycle_data = self.bicycle[i0:i1]
             lidar_data = self.lidar[j0:j1 + 1]
 
-            trials.append(Trial2(bicycle_data,
-                                 lidar_data,
-                                 self.bicycle_period,
-                                 lidar_bbmask))
+            trials.append(trial2.Trial2(bicycle_data,
+                                        lidar_data,
+                                        self.bicycle_period,
+                                        lidar_bbmask))
 
         if len(trials) != 18:
             msg = ('Unexpected number of trials (got {}, not {}).' +

@@ -2,19 +2,25 @@
 from enum import Enum
 from collections import namedtuple
 import heapq
+import os
+import pickle
 import itertools
 import warnings
 
 import numpy as np
 import scipy.signal
 import scipy.spatial
+import scipy.stats
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
 import hdbscan
 
+import antlia.plot_braking as braking
 from antlia import dtc
+from antlia.dtype import load_converted_record
 import antlia.filter as ff
+from antlia.record import load_file, Record
 from antlia.trial import Trial
 import antlia.util as util
 
@@ -49,12 +55,81 @@ EXIT_BB = {
 }
 OBSTACLE_BB = {
     'xlim': (-5, -2),
-    'ylim': (2.70, 3.25)
+    'ylim': (2.70, 3.50)
 }
 VALID_BB = {
     'xlim': (-20, 60),
     'ylim': (1.0, 3.5)
 }
+
+
+def load_records(all_riders=False):
+    with open('../config.p', 'rb') as f:
+        bicycle_calibration = pickle.load(f)
+
+    bicycle_record_files = [
+        '2018-04-23_12-30-38.csv', '2018-04-23_13-13-36.csv',
+        '2018-04-23_14-22-58.csv', '2018-04-23_15-27-48.csv',
+        '2018-04-23_16-32-27.csv', '2018-04-23_17-14-00.csv',
+        '2018-04-25_09-27-24.csv', '2018-04-25_10-20-28.csv',
+        '2018-04-25_11-34-04.csv', '2018-04-25_12-41-48.csv',
+        '2018-04-25_14-14-57.csv', '2018-04-25_14-49-39.csv',
+        '2018-04-25_16-15-57.csv', '2018-04-25_17-23-04.csv',
+        '2018-04-26_11-19-31.csv', '2018-04-26_14-50-53.csv',
+        '2018-04-27_14-59-52.csv'
+    ]
+
+    lidar_record_files = [
+        '2018-04-23-12-17-37_0.pkl.gz', '2018-04-23-13-01-00_0.pkl.gz',
+        '2018-04-23-14-10-33_0.pkl.gz', '2018-04-23-15-15-14_0.pkl.gz',
+        '2018-04-23-16-19-35_0.pkl.gz', '2018-04-23-17-01-24_0.pkl.gz',
+        '2018-04-25-09-15-00_0.pkl.gz', '2018-04-25-10-07-31_0.pkl.gz',
+        '2018-04-25-11-21-29_0.pkl.gz', '2018-04-25-12-29-06_0.pkl.gz',
+        '2018-04-25-14-02-15_0.pkl.gz', '2018-04-25-14-36-55_0.pkl.gz',
+        '2018-04-25-16-03-24_0.pkl.gz', '2018-04-25-17-10-07_0.pkl.gz',
+        '2018-04-26-11-07-38_0.pkl.gz', '2018-04-26-14-38-03_0.pkl.gz',
+        '2018-04-27-14-47-07_0.pkl.gz', '2018-04-27-15-39-56_0.pkl.gz'
+    ]
+
+    records = []
+    data_dir = '../../data/comfort'
+    for i, (file1, file2) in enumerate(zip(bicycle_record_files,
+                                           lidar_record_files)):
+        r1 = load_file(os.path.join(data_dir, file1),
+                              bicycle_calibration['convbike'])
+        r2 = load_converted_record(os.path.join(data_dir, file2))
+        r = Record(r2, r1)
+        records.append(r)
+        print('loaded record from files: {}, {}'.format(file1, file2))
+        if i >= 7  and not all_riders:
+            break
+
+    # notes on missing syncs and repeated trials
+    missing_sync = [
+       [680], None, None, None, None,
+       None, None, None, None, None,
+       None, None, None, None, None,
+       None, None
+    ]
+
+    trial_mask = [
+       None, None, 0, None, None,
+       0, None, None, 9, None,
+       None, 11, 8, 9, None,
+       None, None
+    ]
+
+    for i, (r, ms, tm) in enumerate(zip(records, missing_sync, trial_mask)):
+        print('calculating trials for cyclist', i)
+
+        try:
+            r.sync()
+            r._calculate_trials2(missing_sync=ms, trial_mask=tm)
+        except (AssertionError, ValueError) as e:
+            print('unable to calculate trials for cyclist', i)
+            print(e)
+
+    return records
 
 
 class SteeringIdentification(object):
