@@ -771,7 +771,7 @@ class Event(Trial):
         # butterworth filtered trajectory
         if mode == 'butter':
             order = 4
-            fc = 1.5
+            fc = 0.5
             fs = 20
             wn = fc / (0.5*fs)
             b, a = scipy.signal.butter(order, wn, btype='lowpass')
