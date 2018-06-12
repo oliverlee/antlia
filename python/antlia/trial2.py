@@ -642,7 +642,8 @@ class Event(Trial):
                 self.bicycle.time[case.section[0]])
         amplitude = (case.data[case.section[3]] -
                 case.data[case.section[1]])
-        return duration, amplitude
+        length = len(case.section)
+        return duration, amplitud/e
 
     def plot_clusters(self, plot_cluster_func=None, ax=None, **fig_kw):
         if ax is None:
