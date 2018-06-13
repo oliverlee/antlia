@@ -765,6 +765,14 @@ class Event(Trial):
         ym[ym.mask] = np.interp(
                 np.where(ym.mask)[0], np.where(~ym.mask)[0], ym[~ym.mask])
 
+        # filter out large jumps and re-interp
+        mask = np.zeros(xm.shape, dtype=bool)
+        mask[1:] = np.abs(np.diff(xm)) > 0.5
+        xm[mask] = np.interp(
+                np.where(mask)[0], np.where(~mask)[0], xm[~mask])
+        ym[mask] = np.interp(
+                np.where(mask)[0], np.where(~mask)[0], ym[~mask])
+
         if mode == 'interp':
             return xm, ym
 
