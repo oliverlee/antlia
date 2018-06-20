@@ -753,10 +753,11 @@ class Event(Trial):
         y.mask = self.stationary_mask | self.bb_mask
 
         if bbmask is not None:
-            mask = ((x < bbmask['xlim'][1]) &
-                    (x > bbmask['xlim'][0]) &
-                    (y < bbmask['ylim'][1]) &
-                    (y > bbmask['ylim'][0]))
+            mask = np.ones(x.shape, dtype=bool)
+            if 'xlim' in bbmask:
+                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
+            if 'ylim' in bbmask:
+                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
             x[mask] = np.ma.masked
             y[mask] = np.ma.masked
 
