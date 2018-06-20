@@ -752,12 +752,22 @@ class Event(Trial):
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
+        # exclude obstacle bbox points
+        mask = np.ones(x.shape, dtype=bool)
+        mask &= (x < OBSTACLE_BB['xlim'][1]) & (x > OBSTACLE_BB['xlim'][0])
+        mask &= (y < OBSTACLE_BB['ylim'][1]) & (y > OBSTACLE_BB['ylim'][0])
+        x[mask] = np.ma.masked
+        y[mask] = np.ma.masked
+
         if bbmask is not None:
             mask = np.ones(x.shape, dtype=bool)
             if 'xlim' in bbmask:
                 mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
             if 'ylim' in bbmask:
                 mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
+            if 'zlim' in bbmask:
+                mask &= ((self.z < bbmask['zlim'][1]) &
+                         (self.z > bbmask['zlim'][0]))
             x[mask] = np.ma.masked
             y[mask] = np.ma.masked
 
@@ -835,6 +845,9 @@ class Event(Trial):
                 mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
             if 'ylim' in bbmask:
                 mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
+            if 'zlim' in bbmask:
+                mask &= ((self.z < bbmask['zlim'][1]) &
+                         (self.z > bbmask['zlim'][0]))
 
             ax[0].scatter(x[~mask], y[~mask],
                           s=3, marker='.',
