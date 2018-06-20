@@ -74,7 +74,7 @@ def plotjoint(x, y, dataframe, kde_key=None, color_map=None,
                             color=color_palette[int(r)], shade=True)
     else:
         # use color from scatter plot
-        g.plot_marginals(sns.kdeplot, shade=True)
+        g.plot_marginals(sns.distplot, kde=False, bins=20)
 
     try:
         g.ax_marg_x.legend_.remove()
