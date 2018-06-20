@@ -826,8 +826,24 @@ class Event(Trial):
         y.mask = self.stationary_mask | self.bb_mask
 
         # non-stationary points
-        ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
-                      label='non-stationary points')
+        if bbmask is None:
+            ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
+                          label='non-stationary points')
+        else:
+            mask = np.ones(x.shape, dtype=bool)
+            if 'xlim' in bbmask:
+                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
+            if 'ylim' in bbmask:
+                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
+
+            ax[0].scatter(x[~mask], y[~mask],
+                          s=3, marker='.',
+                          color=colors[1],
+                          label='non-stationary points')
+            ax[0].scatter(x[mask], y[mask],
+                          s=3, marker='.',
+                          color=colors[0],
+                          label='non-stationary points (masked)')
 
         # trajectory points
         xm, ym = self.trajectory(mode='raw', bbmask=bbmask)
@@ -849,11 +865,7 @@ class Event(Trial):
         ax[0].plot(butterf(xm), butterf(ym), color=colors[3],
                    label='NSP centroid (filtered, low pass butterworth)')
 
-        handles, labels = ax[0].get_legend_handles_labels()
-        # move first 2 elements to end
-        handles = handles[2:] + handles[:2]
-        lables = labels[2:] + labels[:2]
-        ax[0].legend(handles, labels)
+        ax[0].legend()
         if not plot_vel:
             return fig, ax[0]
 
