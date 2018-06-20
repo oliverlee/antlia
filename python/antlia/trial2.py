@@ -796,12 +796,20 @@ class Event(Trial):
 
         raise ValueError('Unhandled case for mode {}:'.format(mode))
 
-    def plot_trajectory(self, ax=None, bbmask=None, **fig_kw):
-        if ax is None:
-            fig, ax = plt.subplots(2, 1, sharex=False, **fig_kw)
+    def plot_trajectory(self, ax=None, plot_vel=True, bbmask=None, **fig_kw):
+        if plot_vel:
+            num_plots = 2
         else:
-            assert len(ax) == 2
+            num_plots = 1
+
+        if ax is None:
+            fig, ax = plt.subplots(num_plots, 1, sharex=False, **fig_kw)
+        else:
+            assert len(ax) == num_plots
             fig = ax[0].get_figure()
+
+        if not plot_vel:
+            ax = [ax]
 
         colors = sns.color_palette('Paired', 12)
 
@@ -845,6 +853,8 @@ class Event(Trial):
         handles = handles[2:] + handles[:2]
         lables = labels[2:] + labels[:2]
         ax[0].legend(handles, labels)
+        if not plot_vel:
+            return fig, ax[0]
 
         f = lambda x: np.square(np.diff(x))
         v = lambda x, y: np.sqrt(f(x) + f(y)) / 0.05
