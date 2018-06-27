@@ -6,6 +6,11 @@ import sys
 import numpy as np
 import sympy
 import sympy.physics.vector as vec
+import matplotlib.pyplot as plt
+import scipy.integrate
+import seaborn as sns
+
+from antlia import filter as ff
 
 
 def generate_measurement(event):
@@ -284,6 +289,129 @@ class Kalman(object):
     def smooth_estimate(self, result, progress=False):
         raise NotImplementedError
 
+def plot_kalman_result(result, event=None, ax=None, **fig_kw):
+    if ax is None:
+        fig, ax = plt.subplots(3, 2, sharex=True, **fig_kw)
+    else:
+        fig = ax.get_figure()
+    ax = ax.ravel()
+    ax[0].axis('off')
+    ax[1].axis('off')
+
+    x = result.state_estimate
+    P = result.error_covariance
+
+    if event is None:
+        event_time = np.arange(x.shape[0])
+    else:
+        event_time = event.bicycle.time
+        T = np.diff(event.bicycle.time).mean()
+        z = generate_measurement(event)
+
+    color = sns.color_palette('tab10', 10)
+
+    ax01 = plt.subplot2grid((3, 2), (0, 0), rowspan=1, colspan=2, fig=fig)
+    ax01.plot(x[:, 0], x[:, 1],
+              color=color[0], alpha=0.5,
+              label='KF trajectory')
+    if event is not None:
+        index = ~z.mask.any(axis=1)
+        ax01.scatter(x[index, 0],
+                      x[index, 1],
+                      s=15, marker='X',
+                      color=color[0],
+                      label='KF trajectory (valid measurement)')
+        ax01.scatter(z[:, 0].compressed(),
+                      z[:, 1].compressed(),
+                      s=15, marker='X',
+                      color=color[1], alpha=0.5,
+                      label='trajectory (butter)')
+    ax01.fill_between(x[:, 0].squeeze(),
+                       x[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
+                       x[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
+                       color=color[0], alpha=0.2)
+    ax01.legend()
+
+    ax[2].plot(event_time, x[:, 2],
+               color=color[0],
+               label='KF yaw angle')
+    if event is not None:
+        ax[2].plot(event_time[1:],
+                   scipy.integrate.cumtrapz(z[:, 2], dx=T) + np.pi,
+                   color=color[3], alpha=0.5,
+                   label='integrated yaw rate')
+    ax[2].fill_between(event_time,
+                       x[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
+                       x[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
+                       color=color[0], alpha=0.2)
+    ax[2].legend()
+
+    ax[3].plot(event_time, x[:, 4],
+               color=color[0],
+               label='KF yaw rate')
+    if event is not None:
+        ax[3].plot(event_time, z[:, 2],
+                   color=color[1], alpha=0.5,
+                   label='yaw rate')
+    ax[3].fill_between(event_time,
+                       x[:, 4].squeeze() + np.sqrt(P[:, 4, 4]),
+                       x[:, 4].squeeze() - np.sqrt(P[:, 4, 4]),
+                       color=color[0], alpha=0.2)
+    ax[3].legend()
+
+    ax[4].plot(event_time, x[:, 3],
+               color=color[0],
+               label='KF speed')
+    ylim = ax[4].get_ylim()
+    if event is not None:
+        ax[4].plot(event_time, ff.moving_average(event.bicycle.speed, 55),
+                   color=color[1], alpha=0.5,
+                   label='speed')
+        ax[4].plot(event_time[1:],
+                   scipy.integrate.cumtrapz(z[:, 3], dx=T) + x[0, 3], #FIXME x0
+                   color=color[3], alpha=0.5,
+                   label='integrated accel')
+        ax[4].plot(event_time, event.bicycle.speed,
+                   color=color[1], alpha=0.2,
+                   label='speed (raw)')
+    ax[4].fill_between(event_time,
+                       x[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
+                       x[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
+                       color=color[0], alpha=0.2)
+    ax[4].set_ylim(ylim)
+    ax[4].legend()
+
+    ax[5].plot(event_time, x[:, 5],
+               zorder=2,
+               color=color[0], label='KF accel')
+    ax[5].fill_between(event_time,
+                       x[:, 5].squeeze() + np.sqrt(P[:, 5, 5]),
+                       x[:, 5].squeeze() - np.sqrt(P[:, 5, 5]),
+                       color=color[0], alpha=0.2)
+    if event is not None:
+        ax[5].plot(event_time, z[:, 3],
+                   zorder=1,
+                   color=color[1], alpha=0.5,
+                   label='acceleration')
+    ax[5].legend()
+    return fig, ax
+
+
+def plot_kalman_result_matrix(result_matrix, ax=None, **fig_kw):
+    _, rows, cols = result_matrix.shape
+
+    if ax is None:
+        fig, ax = plt.subplots(rows, cols, sharex=True, **fig_kw)
+    else:
+        fig = ax.get_figure()
+
+    color = sns.husl_palette(rows*cols, l=0.7)
+    for i in range(rows):
+        for j in range(cols):
+            ax[i, j].plot(result_matrix[:, i, j],
+                          color=color[i*cols + j])
+
+    return fig, ax
 
 
 # used in old path estimation (path.py)
