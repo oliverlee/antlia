@@ -34,6 +34,19 @@ def generate_measurement(event):
     return z
 
 
+def initial_state_estimate(measurement):
+    f_bicycle = 125 # Hz
+    f_lidar = 20 # Hz
+
+    z = measurement
+    px = z[:125, 0].max() + 0.3
+    py = z[:125, 1].mean()
+    yaw = np.pi
+    v = np.abs(np.diff(z[:125, 0].compressed()).mean())*f_lidar
+
+    return np.r_[px, py, yaw, v, 0.0, 0.0]
+
+
 def generate_fhFH(constant_velocity=True,
                   sample_period=1/125,      # seconds
                   wheelbase=1.0,            # meters
@@ -326,6 +339,11 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
                       s=15, marker='X',
                       color=color[1], alpha=0.5,
                       label='trajectory (butter)')
+        ax01.scatter(event.x,
+                     event.y,
+                     s=1, marker='.',
+                     color=color[1], alpha=0.1,
+                     label='lidar point cloud')
     ax01.fill_between(x[:, 0].squeeze(),
                        x[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
                        x[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
@@ -362,13 +380,14 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
     ax[4].plot(event_time, x[:, 3],
                color=color[0],
                label='KF speed')
+    ax[4].axhline(0, color='black')
     ylim = ax[4].get_ylim()
     if event is not None:
         ax[4].plot(event_time, ff.moving_average(event.bicycle.speed, 55),
                    color=color[1], alpha=0.5,
                    label='speed')
         ax[4].plot(event_time[1:],
-                   scipy.integrate.cumtrapz(z[:, 3], dx=T) + x[0, 3], #FIXME x0
+                   scipy.integrate.cumtrapz(z[:, 3], dx=T) + x[0, 3],
                    color=color[3], alpha=0.5,
                    label='integrated accel')
         ax[4].plot(event_time, event.bicycle.speed,
