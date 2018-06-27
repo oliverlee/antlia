@@ -791,8 +791,9 @@ class Event(Trial):
         xm = x.mean(axis=1)
         ym = y.mean(axis=1)
 
-        # mask elements where the count is low
-        mask = x.count(axis=1) < 3
+        # mask elements where the point cloud size is low
+        minimum_point_cloud_size = 5
+        mask = x.count(axis=1) < minimum_point_cloud_size
         xm[mask] = np.ma.masked
         ym[mask] = np.ma.masked
 
@@ -807,7 +808,10 @@ class Event(Trial):
 
         # filter out large jumps and re-interp
         mask = np.zeros(xm.shape, dtype=bool)
-        mask[1:] = np.abs(np.diff(xm)) > 0.5
+        # max_xvel is x change in one frame
+        # -> (0.4 m)/(0.05 sec) = 28.8 kph
+        max_xvel = 0.4
+        mask[1:] = np.abs(np.diff(xm)) > max_xvel
         xm[mask] = np.interp(
                 np.where(mask)[0], np.where(~mask)[0], xm[~mask])
         ym[mask] = np.interp(
