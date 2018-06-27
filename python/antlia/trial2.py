@@ -752,10 +752,11 @@ class Event(Trial):
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
-        # exclude obstacle bbox points
-        mask = np.ones(x.shape, dtype=bool)
-        mask &= (x < OBSTACLE_BB['xlim'][1]) & (x > OBSTACLE_BB['xlim'][0])
-        mask &= (y < OBSTACLE_BB['ylim'][1]) & (y > OBSTACLE_BB['ylim'][0])
+        # mask points in obstacle bounding box
+        mask = ((x > OBSTACLE_BB['xlim'][0]) &
+                (x < OBSTACLE_BB['xlim'][1]) &
+                (y > OBSTACLE_BB['ylim'][0]) &
+                (y < OBSTACLE_BB['ylim'][1]))
         x[mask] = np.ma.masked
         y[mask] = np.ma.masked
 
