@@ -300,9 +300,49 @@ class Kalman(object):
                 predicted_error_covariance=P_)
 
     def smooth_estimate(self, result, progress=False):
-        raise NotImplementedError
+        """Smooth the Kalman estimate using the Rauch-Tung-Striebel method.
+        """
+        N = result.kalman_gain.shape[0]
 
-def plot_kalman_result(result, event=None, ax=None, **fig_kw):
+        x = np.zeros(result.state_estimate.shape)
+        P = np.zeros(result.error_covariance.shape)
+        x[-1] = result.state_estimate[-1]
+        P[-1] = result.error_covariance[-1]
+
+        for k in range(N)[-2::-1]:
+            if callable(self.F):
+                F = self.F(result.predicted_state_estimate[k + 1])
+            else:
+                F = self.F
+            # C = P_k|k (F_k+1)^T (P_k+1|k)^-1
+            # C (P_k+1|k) = P_k|k (F_k+1)^T
+            # (P_k+1|k)^T C^T = (P_k|k (F_k+1)^T)^T
+            # ->        A   x =                   b
+            C = np.linalg.solve(result.predicted_error_covariance[k + 1].T,
+                                (result.error_covariance[k]@F.T).T).T
+
+            x[k] = (result.state_estimate[k] +
+                    C@(x[k + 1] - result.predicted_state_estimate[k + 1]))
+            P[k] = (result.error_covariance[k] +
+                    C@(P[k + 1] - result.predicted_error_covariance[k + 1])@C.T)
+
+            if progress:
+                # print progress bar
+                percent = int(np.ceil(k/(N + 1)*1000))
+                s = '='*(percent//10) + ' '*(100 - percent//10)
+                sys.stdout.write('\r')
+                sys.stdout.write('[{}] {}%'.format(s, percent/10))
+                sys.stdout.flush()
+
+        return KalmanResult(
+                state_estimate=x,
+                error_covariance=P,
+                kalman_gain=None,
+                predicted_state_estimate=None,
+                predicted_error_covariance=None)
+
+def plot_kalman_result(result, event=None, smoothed_result=None,
+                       ax=None, **fig_kw):
     if ax is None:
         fig, ax = plt.subplots(3, 2, sharex=True, **fig_kw)
     else:
@@ -327,6 +367,10 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
     ax01.plot(x[:, 0], x[:, 1],
               color=color[0], alpha=0.5,
               label='KF trajectory')
+    ax01.fill_between(x[:, 0].squeeze(),
+                       x[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
+                       x[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
+                       color=color[0], alpha=0.2)
     if event is not None:
         index = ~z.mask.any(axis=1)
         ax01.scatter(x[index, 0],
@@ -334,6 +378,23 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
                       s=15, marker='X',
                       color=color[0],
                       label='KF trajectory (valid measurement)')
+    if smoothed_result is not None:
+        xs = smoothed_result.state_estimate
+        ax01.plot(xs[:, 0],
+                  xs[:, 1],
+                  color=color[2], alpha=0.5,
+                  label='KS trajectory')
+        ax01.fill_between(xs[:, 0].squeeze(),
+                          xs[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
+                          xs[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
+                          color=color[2], alpha=0.2)
+        if event is not None:
+            ax01.scatter(xs[index, 0],
+                         xs[index, 1],
+                         s=15, marker='X',
+                         color=color[2],
+                         label='KS trajectory (valid measurement)')
+    if event is not None:
         ax01.scatter(z[:, 0].compressed(),
                       z[:, 1].compressed(),
                       s=15, marker='X',
@@ -344,44 +405,68 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
                      s=1, marker='.',
                      color=color[1], alpha=0.1,
                      label='lidar point cloud')
-    ax01.fill_between(x[:, 0].squeeze(),
-                       x[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
-                       x[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
-                       color=color[0], alpha=0.2)
     ax01.legend()
 
     ax[2].plot(event_time, x[:, 2],
                color=color[0],
                label='KF yaw angle')
+    ax[2].fill_between(event_time,
+                       x[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
+                       x[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
+                       color=color[0], alpha=0.2)
+    if smoothed_result is not None:
+        ax[2].plot(event_time, xs[:, 2],
+                   color=color[2],
+                   label='KS yaw angle')
+        ax[2].fill_between(event_time,
+                           xs[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
+                           xs[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
+                           color=color[2], alpha=0.2)
     if event is not None:
         ax[2].plot(event_time[1:],
                    scipy.integrate.cumtrapz(z[:, 2], dx=T) + np.pi,
                    color=color[3], alpha=0.5,
                    label='integrated yaw rate')
-    ax[2].fill_between(event_time,
-                       x[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
-                       x[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
-                       color=color[0], alpha=0.2)
     ax[2].legend()
 
     ax[3].plot(event_time, x[:, 4],
                color=color[0],
                label='KF yaw rate')
-    if event is not None:
-        ax[3].plot(event_time, z[:, 2],
-                   color=color[1], alpha=0.5,
-                   label='yaw rate')
     ax[3].fill_between(event_time,
                        x[:, 4].squeeze() + np.sqrt(P[:, 4, 4]),
                        x[:, 4].squeeze() - np.sqrt(P[:, 4, 4]),
                        color=color[0], alpha=0.2)
+    if smoothed_result is not None:
+        ax[3].plot(event_time, xs[:, 4],
+                   color=color[2],
+                   label='KS yaw rate')
+        ax[3].fill_between(event_time,
+                           xs[:, 4].squeeze() + np.sqrt(P[:, 4, 4]),
+                           xs[:, 4].squeeze() - np.sqrt(P[:, 4, 4]),
+                           color=color[2], alpha=0.2)
+    if event is not None:
+        ax[3].plot(event_time, z[:, 2],
+                   color=color[1], alpha=0.5,
+                   label='yaw rate')
     ax[3].legend()
 
     ax[4].plot(event_time, x[:, 3],
                color=color[0],
                label='KF speed')
+    ax[4].fill_between(event_time,
+                       x[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
+                       x[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
+                       color=color[0], alpha=0.2)
     ax[4].axhline(0, color='black')
     ylim = ax[4].get_ylim()
+    if smoothed_result is not None:
+        ax[4].plot(event_time, xs[:, 3],
+                   color=color[2],
+                   label='KS speed')
+        ax[4].fill_between(event_time,
+                           xs[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
+                           xs[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
+                           color=color[2], alpha=0.2)
     if event is not None:
         ax[4].plot(event_time, ff.moving_average(event.bicycle.speed, 55),
                    color=color[1], alpha=0.5,
@@ -393,10 +478,6 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
         ax[4].plot(event_time, event.bicycle.speed,
                    color=color[1], alpha=0.2,
                    label='speed (raw)')
-    ax[4].fill_between(event_time,
-                       x[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
-                       x[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
-                       color=color[0], alpha=0.2)
     ax[4].set_ylim(ylim)
     ax[4].legend()
 
@@ -407,6 +488,14 @@ def plot_kalman_result(result, event=None, ax=None, **fig_kw):
                        x[:, 5].squeeze() + np.sqrt(P[:, 5, 5]),
                        x[:, 5].squeeze() - np.sqrt(P[:, 5, 5]),
                        color=color[0], alpha=0.2)
+    if smoothed_result is not None:
+        ax[5].plot(event_time, xs[:, 5],
+                   zorder=2,
+                   color=color[2], label='KS accel')
+        ax[5].fill_between(event_time,
+                           xs[:, 5].squeeze() + np.sqrt(P[:, 5, 5]),
+                           xs[:, 5].squeeze() - np.sqrt(P[:, 5, 5]),
+                           color=color[2], alpha=0.2)
     if event is not None:
         ax[5].plot(event_time, z[:, 3],
                    zorder=1,
