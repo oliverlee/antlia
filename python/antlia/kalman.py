@@ -8,6 +8,7 @@ import sympy
 import sympy.physics.vector as vec
 import matplotlib.pyplot as plt
 import scipy.integrate
+import scipy.optimize
 import seaborn as sns
 
 from antlia import filter as ff
@@ -39,12 +40,62 @@ def initial_state_estimate(measurement):
     f_lidar = 20 # Hz
 
     z = measurement
-    px = z[:125, 0].max() + 0.3
+    px = z[:125, 0].max() + 0.5 # offset of centroid from rear wheel contact
     py = z[:125, 1].mean()
     yaw = np.pi
-    v = np.abs(np.diff(z[:125, 0].compressed()).mean())*f_lidar
+    v = np.abs(np.diff(z[:125, 0].compressed()).mean())*f_lidar * 2
 
     return np.r_[px, py, yaw, v, 0.0, 0.0]
+
+
+def generate_R(record):
+    """Generate a state dependent matrix for observation noise covariance R.
+    """
+    # use record samples where sync is active for gyroscope, accelerometer
+    # variance
+    index = record.bicycle.sync.astype(bool)
+    yaw_rate_var = record.bicycle['gyroscope z'][index].var()
+    accel_var = record.bicycle['accelerometer x'][index].var()
+
+    dist = np.array([])
+    dx = np.array([])
+    dy = np.array([])
+    for trial in record.trials:
+        event = trial.event
+        traj_raw = event.trajectory('raw')
+        traj_butter = event.trajectory('butter')
+
+        # get distance from origin for butter trajectory
+        dist = np.append(dist, np.linalg.norm(np.vstack(traj_butter), axis=0))
+
+        # get distance between corresponding points in raw and butter trajectories
+        dx = np.append(dx, traj_raw[0] - traj_butter[0])
+        dy = np.append(dy, traj_raw[1] - traj_butter[1])
+
+    # ignore entries where error is zero
+    error = np.linalg.norm(np.vstack((dx, dy)), axis=0)
+    index = error > 1e-3 # redefine index
+
+    # fit trajectory differences to an exponential model
+    def func(x, a, b):
+        return a*np.exp(b*x)
+    xparam_opt = scipy.optimize.curve_fit(
+            func, dist[index], np.abs(dx[index]),
+            p0=(1e-3, 0.1), maxfev=10000)[0]
+    yparam_opt = scipy.optimize.curve_fit(
+            func, dist[index], np.abs(dx[index]),
+            p0=(1e-3, 0.1), maxfev=10000)[0]
+
+    x_var = lambda state: func(np.linalg.norm(state[:2]), *xparam_opt)**2
+    y_var = lambda state: func(np.linalg.norm(state[:2]), *yparam_opt)**2
+
+    def R(state):
+        return np.diag([
+            x_var(state),
+            y_var(state),
+            yaw_rate_var,
+            accel_var])
+    return R
 
 
 def generate_fhFH(constant_velocity=True,
@@ -186,8 +237,10 @@ class Kalman(object):
            function taking n arguments and returning a matrix of shape (n, n).
         H: Observation model. A constant matrix of shape (l, n) or a function
            taking n arguments and returning a matrix of shape (l, n).
-        Q: Process noise covariance. A constant matrix of shape (n, n).
-        R: Measurement noise covariance. A constant matrix of shape (l, l)
+        Q: Process noise covariance. A constant matrix of shape (n, n) or a
+           function taking n arguments and returning a matrix of shape (n, n).
+        R: Measurement noise covariance. A constant matrix of shape (l, l) or a
+           function taking n arguments and returning a matrix of shape (l, l).
 
         f: Nonlinear state-transition model. A function taking n arguments and
            returning a matrix of shape (n, 1).
@@ -264,7 +317,11 @@ class Kalman(object):
                 # and we use the linear Kalman filter equation for time update
                 F = self.F
                 x_hat_[k] = F@x_hat[k - 1]
-            P_[k] = F@P[k - 1]@F.T + self.Q
+            if callable(self.Q):
+                Q = self.Q(x_hat_[k])
+            else:
+                Q = self.Q
+            P_[k] = F@P[k - 1]@F.T + Q
 
             # measurement update
             if self.h is not None:
@@ -279,7 +336,11 @@ class Kalman(object):
             missing_mask = z[k].mask.reshape((-1, 1)) | (np.abs(y) > y_steptol)
             H[missing_mask.squeeze(), :] = 0
 
-            S = H@P_[k]@H.T + self.R
+            if callable(self.R):
+                R = self.R(x_hat_[k])
+            else:
+                R = self.R
+            S = H@P_[k]@H.T + R
             K[k] = np.linalg.solve(S.T, (P_[k]@H.T).T).T
             x_hat[k] = x_hat_[k] + K[k]@y
             P[k] = (np.eye(n) - K[k]@H)@P_[k]
@@ -403,7 +464,8 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
         ax01.scatter(event.x,
                      event.y,
                      s=1, marker='.',
-                     color=color[1], alpha=0.1,
+                     zorder=0,
+                     color=color[6], alpha=0.5,
                      label='lidar point cloud')
     ax01.legend()
 
