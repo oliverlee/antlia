@@ -111,9 +111,10 @@ class EventType(Enum):
 
 
 class Event(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, event_type,
+    def __init__(self, trial, bicycle_data, lidar_data, period, event_type,
                  invalid_bb=None):
             super().__init__(bicycle_data, period)
+            self.trial = trial
             self.lidar = lidar_data
             self.bicycle = self.data
             self.type = event_type
@@ -1047,10 +1048,12 @@ class Event(Trial):
 
 
 class Trial2(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, invalid_bb=None):
+    def __init__(self, record, bicycle_data, lidar_data, period,
+                 invalid_bb=None):
             super().__init__(bicycle_data, period)
-            self.lidar = lidar_data
+            self.record = record
             self.bicycle = self.data
+            self.lidar = lidar_data
 
             self.event_indices = None
             self.event_detection = None
@@ -1187,6 +1190,7 @@ class Trial2(Trial):
         t0 = self.bicycle.time[evt_index[0]]
         t1 = self.bicycle.time[evt_index[1]] + 0.05 # add one extra lidar frame
         self.event = Event(
+                self,
                 self.bicycle[evt_index[0]:evt_index[1]],
                 self.lidar.frame(lambda t: (t >= t0) & (t < t1)),
                 self.period,

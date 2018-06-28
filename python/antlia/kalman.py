@@ -43,7 +43,7 @@ def initial_state_estimate(measurement):
     px = z[:125, 0].max() + 0.5 # offset of centroid from rear wheel contact
     py = z[:125, 1].mean()
     yaw = np.pi
-    v = np.abs(np.diff(z[:125, 0].compressed()).mean())*f_lidar * 2
+    v = np.abs(np.diff(z[:125, 0].compressed()).mean())*f_lidar
 
     return np.r_[px, py, yaw, v, 0.0, 0.0]
 
