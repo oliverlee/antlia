@@ -138,7 +138,7 @@ class Event(Trial):
                              hdbscan_kw=None, invalid_bb=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
 
-        # exclusive bbmask
+        # exclusive apply_bbmask
         if invalid_bb is not None:
             if not hasattr(invalid_bb, '__iter__'):
                 invalid_bb = [invalid_bb]
@@ -746,35 +746,54 @@ class Event(Trial):
         return fig, ax
 
     def trajectory(self, mode=None, bbmask=None):
+        def apply_bbmask(x, y, bounding_box):
+            if 'xlim' in bounding_box:
+                mask &= ((x < bounding_box['xlim'][1]) &
+                         (x > bounding_box['xlim'][0]))
+            if 'ylim' in bounding_box:
+                mask &= ((y < bounding_box['ylim'][1]) &
+                         (y > bounding_box['ylim'][0]))
+            if 'zlim' in bounding_box:
+                mask &= ((self.z < bounding_box['zlim'][1]) &
+                         (self.z > bounding_box['zlim'][0]))
+            x[mask] = np.ma.masked
+            y[mask] = np.ma.masked
+
         # stationary points
         x = self.x.copy()
         y = self.y.copy()
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
-        # mask points in obstacle bounding box
-        mask = ((x > OBSTACLE_BB['xlim'][0]) &
-                (x < OBSTACLE_BB['xlim'][1]) &
-                (y > OBSTACLE_BB['ylim'][0]) &
-                (y < OBSTACLE_BB['ylim'][1]))
-        x[mask] = np.ma.masked
-        y[mask] = np.ma.masked
+        # handle bbmask is passed as an argument
+        if bbamask is None:
+            arg_bbox = []
+        else:
+            arg_bbox = [bbmask]
 
-        if bbmask is not None:
-            mask = np.ones(x.shape, dtype=bool)
-            if 'xlim' in bbmask:
-                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
-            if 'ylim' in bbmask:
-                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
-            if 'zlim' in bbmask:
-                mask &= ((self.z < bbmask['zlim'][1]) &
-                         (self.z > bbmask['zlim'][0]))
-            x[mask] = np.ma.masked
-            y[mask] = np.ma.masked
+        # determine stationary noise bounding boxes
+        stationary_bboxes = []
+        for cluster in self.clusters:
+            if cluster.stationary:
+                X = self.valid_points[cluster.index]
+                mins = X.min(axis=0)
+                maxs = X.max(axis=0)
+                stationary_bboxes.append({'xlim': (mins[0], maxs[0]),
+                                          'ylim': (mins[1], maxs[1])})
+
+        # mask points in specified bounding boxes
+        for bbox in stationary_bboxes + arg_bbox:
+            apply_bbmask(x, y, bbox)
+        apply_bbmask(x, y, OBSTACLE_BB)
 
         # trajectory points
         xm = x.mean(axis=1)
         ym = y.mean(axis=1)
+
+        # mask elements where the count is low
+        mask = x.count(axis=1) < 3
+        xm[mask] = np.ma.masked
+        ym[mask] = np.ma.masked
 
         if mode is None or mode == 'raw':
             return xm, ym
