@@ -48,8 +48,13 @@ def initial_state_estimate(measurement):
     return np.r_[px, py, yaw, v, 0.0, 0.0]
 
 
-def generate_R(record):
+def generate_R(record, return_functions=False):
     """Generate a state dependent matrix for observation noise covariance R.
+
+    Parameters:
+    record: a Record object
+    return_functions: bool. If True, returns the noise variance functions.
+                      Defaults to False.
     """
     # use record samples where sync is active for gyroscope, accelerometer
     # variance
@@ -95,6 +100,9 @@ def generate_R(record):
             y_var(state),
             yaw_rate_var,
             accel_var])
+    if return_functions:
+        return R, (lambda x: func(x, *xparam_opt)**2,
+                   lambda y: func(y, *yparam_opt)**2)
     return R
 
 
