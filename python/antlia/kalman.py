@@ -88,7 +88,7 @@ def generate_R(record, return_functions=False):
             func, dist[index], np.abs(dx[index]),
             p0=(1e-3, 0.1), maxfev=10000)[0]
     yparam_opt = scipy.optimize.curve_fit(
-            func, dist[index], np.abs(dx[index]),
+            func, dist[index], np.abs(dy[index]),
             p0=(1e-3, 0.1), maxfev=10000)[0]
 
     x_var = lambda state: func(np.linalg.norm(state[:2]), *xparam_opt)**2
