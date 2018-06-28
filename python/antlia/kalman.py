@@ -403,7 +403,7 @@ class Kalman(object):
                 predicted_error_covariance=None)
 
 def plot_kalman_result(result, event=None, smoothed_result=None,
-                       ax=None, **fig_kw):
+                       wheelbase=1.0, ax=None, **fig_kw):
     if ax is None:
         fig, ax = plt.subplots(3, 2, sharex=True, **fig_kw)
     else:
@@ -415,6 +415,12 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
     x = result.state_estimate
     P = result.error_covariance
 
+    def correct_trajectory(state, wheelbase):
+        yaw = state[:, 2]
+        x = state[:, 0] + wheelbase/2*np.cos(yaw)
+        y = state[:, 1] + wheelbase/2*np.sin(yaw)
+        return x.squeeze(), y.squeeze()
+
     if event is None:
         event_time = np.arange(x.shape[0])
     else:
@@ -425,33 +431,36 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
     color = sns.color_palette('tab10', 10)
 
     ax01 = plt.subplot2grid((3, 2), (0, 0), rowspan=1, colspan=2, fig=fig)
-    ax01.plot(x[:, 0], x[:, 1],
+    _x, _y = correct_trajectory(x, wheelbase)
+    ax01.plot(_x, _y,
               color=color[0], alpha=0.5,
               label='KF trajectory')
-    ax01.fill_between(x[:, 0].squeeze(),
-                       x[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
-                       x[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
-                       color=color[0], alpha=0.2)
+    ax01.fill_between(_x,
+                      _y + np.sqrt(P[:, 1, 1]),
+                      _y - np.sqrt(P[:, 1, 1]),
+                      color=color[0], alpha=0.2)
     if event is not None:
         index = ~z.mask.any(axis=1)
-        ax01.scatter(x[index, 0],
-                      x[index, 1],
-                      s=15, marker='X',
-                      color=color[0],
-                      label='KF trajectory (valid measurement)')
+        ax01.scatter(_x[index],
+                     _y[index],
+                     s=15, marker='X',
+                     color=color[0],
+                     label='KF trajectory (valid measurement)')
     if smoothed_result is not None:
         xs = smoothed_result.state_estimate
-        ax01.plot(xs[:, 0],
-                  xs[:, 1],
+        Ps = smoothed_result.error_covariance
+        _x, _y = correct_trajectory(xs, wheelbase)
+        ax01.plot(_x,
+                  _y,
                   color=color[2], alpha=0.5,
                   label='KS trajectory')
-        ax01.fill_between(xs[:, 0].squeeze(),
-                          xs[:, 1].squeeze() + np.sqrt(P[:, 1, 1]),
-                          xs[:, 1].squeeze() - np.sqrt(P[:, 1, 1]),
+        ax01.fill_between(_x,
+                          _y + np.sqrt(Ps[:, 1, 1]),
+                          _y - np.sqrt(Ps[:, 1, 1]),
                           color=color[2], alpha=0.2)
         if event is not None:
-            ax01.scatter(xs[index, 0],
-                         xs[index, 1],
+            ax01.scatter(_x[index],
+                         _y[index],
                          s=15, marker='X',
                          color=color[2],
                          label='KS trajectory (valid measurement)')
@@ -481,8 +490,8 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
                    color=color[2],
                    label='KS yaw angle')
         ax[2].fill_between(event_time,
-                           xs[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
-                           xs[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
+                           xs[:, 2].squeeze() + np.sqrt(Ps[:, 2, 2]),
+                           xs[:, 2].squeeze() - np.sqrt(Ps[:, 2, 2]),
                            color=color[2], alpha=0.2)
     if event is not None:
         ax[2].plot(event_time[1:],
@@ -503,8 +512,8 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
                    color=color[2],
                    label='KS yaw rate')
         ax[3].fill_between(event_time,
-                           xs[:, 4].squeeze() + np.sqrt(P[:, 4, 4]),
-                           xs[:, 4].squeeze() - np.sqrt(P[:, 4, 4]),
+                           xs[:, 4].squeeze() + np.sqrt(Ps[:, 4, 4]),
+                           xs[:, 4].squeeze() - np.sqrt(Ps[:, 4, 4]),
                            color=color[2], alpha=0.2)
     if event is not None:
         ax[3].plot(event_time, z[:, 2],
@@ -526,8 +535,8 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
                    color=color[2],
                    label='KS speed')
         ax[4].fill_between(event_time,
-                           xs[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
-                           xs[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
+                           xs[:, 3].squeeze() + np.sqrt(Ps[:, 3, 3]),
+                           xs[:, 3].squeeze() - np.sqrt(Ps[:, 3, 3]),
                            color=color[2], alpha=0.2)
     if event is not None:
         ax[4].plot(event_time, ff.moving_average(event.bicycle.speed, 55),
@@ -555,8 +564,8 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
                    zorder=2,
                    color=color[2], label='KS accel')
         ax[5].fill_between(event_time,
-                           xs[:, 5].squeeze() + np.sqrt(P[:, 5, 5]),
-                           xs[:, 5].squeeze() - np.sqrt(P[:, 5, 5]),
+                           xs[:, 5].squeeze() + np.sqrt(Ps[:, 5, 5]),
+                           xs[:, 5].squeeze() - np.sqrt(Ps[:, 5, 5]),
                            color=color[2], alpha=0.2)
     if event is not None:
         ax[5].plot(event_time, z[:, 3],
