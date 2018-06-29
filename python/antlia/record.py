@@ -216,6 +216,8 @@ class Record(object):
         self._trial_range_index = None
         self.trial = None
 
+        self.offset = {} # applied to bicycle signals
+
         dt = np.diff(self.bicycle.time)
         self.bicycle_period = self._nearest_millisecond(dt.mean())
 
@@ -245,8 +247,10 @@ class Record(object):
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
 
-    def _calculate_trials2(self, missing_sync=None, trial_mask=None,
-                           lidar_bbmask=None):
+    def _calculate_trials2(self, missing_sync=None,
+                           trial_mask=None,
+                           lidar_bbmask=None,
+                           offset_calibration=True):
         """Calculate trials from bicycle and lidar data using sync signals.
         The braking and overtaking event is calculated.
 
@@ -258,6 +262,8 @@ class Record(object):
                     trial indices to ignore
         lidar_bbmask: dict, keywords to pass to lidar.cartesian() for a bounding
                       box to exclude during event detection
+        offset_calibration: bool, use data when sync is active to calibrate
+                            zero offset for bicycle IMU signals.
 
         Notes:
         All elements in missing_sync are treated as timestamps for rising edges.
@@ -270,6 +276,13 @@ class Record(object):
               missing_sync=[650],
               skip_trial=0)
         """
+        if offset_calibration:
+            index = self.bicycle.sync.astype(int)
+            for name in self.bicycle.dtype.names:
+                if name.startswith(('accelerometer', 'gyroscope')):
+                    offset_value = -self.bicycle[name][index].mean()
+                    self.bicycle[name] += offset_value
+                    self.offset[name] = offset_value
 
         edges = np.diff(self.bicycle.sync.astype(int))
         rising = np.where(edges > 0)[0]
@@ -311,10 +324,11 @@ class Record(object):
             bicycle_data = self.bicycle[i0:i1]
             lidar_data = self.lidar[j0:j1 + 1]
 
-            trials.append(Trial2(bicycle_data,
+            trials.append(Trial2(self,
+                                 bicycle_data,
                                  lidar_data,
                                  self.bicycle_period,
-                                 lidar_bbmask))
+                                 invalid_bb=lidar_bbmask))
 
         if len(trials) != 18:
             msg = ('Unexpected number of trials (got {}, not {}).' +

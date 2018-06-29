@@ -111,9 +111,10 @@ class EventType(Enum):
 
 
 class Event(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, event_type,
+    def __init__(self, trial, bicycle_data, lidar_data, period, event_type,
                  invalid_bb=None):
             super().__init__(bicycle_data, period)
+            self.trial = trial
             self.lidar = lidar_data
             self.bicycle = self.data
             self.type = event_type
@@ -138,7 +139,7 @@ class Event(Trial):
                              hdbscan_kw=None, invalid_bb=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
 
-        # exclusive bbmask
+        # exclusive apply_bbmask
         if invalid_bb is not None:
             if not hasattr(invalid_bb, '__iter__'):
                 invalid_bb = [invalid_bb]
@@ -746,34 +747,55 @@ class Event(Trial):
         return fig, ax
 
     def trajectory(self, mode=None, bbmask=None):
+        def apply_bbmask(x, y, bounding_box):
+            if 'xlim' in bounding_box:
+                mask &= ((x < bounding_box['xlim'][1]) &
+                         (x > bounding_box['xlim'][0]))
+            if 'ylim' in bounding_box:
+                mask &= ((y < bounding_box['ylim'][1]) &
+                         (y > bounding_box['ylim'][0]))
+            if 'zlim' in bounding_box:
+                mask &= ((self.z < bounding_box['zlim'][1]) &
+                         (self.z > bounding_box['zlim'][0]))
+            x[mask] = np.ma.masked
+            y[mask] = np.ma.masked
+
         # stationary points
         x = self.x.copy()
         y = self.y.copy()
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
-        # exclude obstacle bbox points
-        mask = np.ones(x.shape, dtype=bool)
-        mask &= (x < OBSTACLE_BB['xlim'][1]) & (x > OBSTACLE_BB['xlim'][0])
-        mask &= (y < OBSTACLE_BB['ylim'][1]) & (y > OBSTACLE_BB['ylim'][0])
-        x[mask] = np.ma.masked
-        y[mask] = np.ma.masked
+        # handle bbmask is passed as an argument
+        if bbamask is None:
+            arg_bbox = []
+        else:
+            arg_bbox = [bbmask]
 
-        if bbmask is not None:
-            mask = np.ones(x.shape, dtype=bool)
-            if 'xlim' in bbmask:
-                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
-            if 'ylim' in bbmask:
-                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
-            if 'zlim' in bbmask:
-                mask &= ((self.z < bbmask['zlim'][1]) &
-                         (self.z > bbmask['zlim'][0]))
-            x[mask] = np.ma.masked
-            y[mask] = np.ma.masked
+        # determine stationary noise bounding boxes
+        stationary_bboxes = []
+        for cluster in self.clusters:
+            if cluster.stationary:
+                X = self.valid_points[cluster.index]
+                mins = X.min(axis=0)
+                maxs = X.max(axis=0)
+                stationary_bboxes.append({'xlim': (mins[0], maxs[0]),
+                                          'ylim': (mins[1], maxs[1])})
+
+        # mask points in specified bounding boxes
+        for bbox in stationary_bboxes + arg_bbox:
+            apply_bbmask(x, y, bbox)
+        apply_bbmask(x, y, OBSTACLE_BB)
 
         # trajectory points
         xm = x.mean(axis=1)
         ym = y.mean(axis=1)
+
+        # mask elements where the point cloud size is low
+        minimum_point_cloud_size = 5
+        mask = x.count(axis=1) < minimum_point_cloud_size
+        xm[mask] = np.ma.masked
+        ym[mask] = np.ma.masked
 
         if mode is None or mode == 'raw':
             return xm, ym
@@ -786,7 +808,10 @@ class Event(Trial):
 
         # filter out large jumps and re-interp
         mask = np.zeros(xm.shape, dtype=bool)
-        mask[1:] = np.abs(np.diff(xm)) > 0.5
+        # max_xvel is x change in one frame
+        # -> (0.4 m)/(0.05 sec) = 28.8 kph
+        max_xvel = 0.4
+        mask[1:] = np.abs(np.diff(xm)) > max_xvel
         xm[mask] = np.interp(
                 np.where(mask)[0], np.where(~mask)[0], xm[~mask])
         ym[mask] = np.interp(
@@ -1027,10 +1052,12 @@ class Event(Trial):
 
 
 class Trial2(Trial):
-    def __init__(self, bicycle_data, lidar_data, period, invalid_bb=None):
+    def __init__(self, record, bicycle_data, lidar_data, period,
+                 invalid_bb=None):
             super().__init__(bicycle_data, period)
-            self.lidar = lidar_data
+            self.record = record
             self.bicycle = self.data
+            self.lidar = lidar_data
 
             self.event_indices = None
             self.event_detection = None
@@ -1167,8 +1194,18 @@ class Trial2(Trial):
         t0 = self.bicycle.time[evt_index[0]]
         t1 = self.bicycle.time[evt_index[1]] + 0.05 # add one extra lidar frame
         self.event = Event(
+                self,
                 self.bicycle[evt_index[0]:evt_index[1]],
                 self.lidar.frame(lambda t: (t >= t0) & (t < t1)),
                 self.period,
                 event_type,
                 invalid_bb=invalid_bb)
+
+def instructed_speed(record_id, trial_id):
+    speed_order = np.r_[12, 17, 22,
+                        12, 22, 17,
+                        17, 12, 22,
+                        17, 22, 12,
+                        22, 12, 17,
+                        22, 17, 12].astype(np.float) / 3.6
+    return np.roll(speed_order, -3*record_id)[trial_id]
