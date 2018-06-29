@@ -143,9 +143,6 @@ class Event(Trial):
         if bbmask is not None:
             _apply_bbmask(bbmask, x, y)
 
-        # use the same mask for x and y
-        y.mask = x.mask
-
         # rescale z and then use the same mask as x and y
         assert z.shape[0] > 1
         z.mask = False
@@ -1031,24 +1028,18 @@ class Trial2(Trial):
             self._detect_event(bbmask=bbmask)
 
     @staticmethod
-    def mask_a(bicycle_data):
+    def frame_mask_a(bicycle_data):
         return bicycle_data.speed > 0.5
 
     @staticmethod
-    def mask_b(lidar_data, bbmask=None):
-        bbplus = lidar_data.cartesian(**VALID_BB)[0].count(axis=1)
+    def frame_mask_b(lidar_data, bbmask=None):
+        x, y = lidar_data.cartesian(**VALID_BB)
 
-        # subtract the obstacle
-        bbplus -= lidar_data.cartesian(**OBSTACLE_BB)[0].count(axis=1)
-
-        mask = bbplus
+        _apply_bbmask(OBSTACLE_BB, x, y)
         if bbmask is not None:
-            if isinstance(bbmask, dict):
-                bbmask = [bbmask]
+            _apply_bbmask(bbmask, x, y)
 
-            for bbminus in bbmask:
-                mask -= lidar_data.cartesian(**bbminus)[0].count(axis=1)
-        return mask > 1
+        return x.count(axis=1) > 1
 
     @staticmethod
     def event_indices(mask):
@@ -1076,8 +1067,8 @@ class Trial2(Trial):
                 lidar.cartesian() for an area to ignore for event detection.
                 This is used in the event of erroneous lidar data.
         """
-        mask_a = Trial2.mask_a(self.bicycle)
-        mask_b = Trial2.mask_b(self.lidar, bbmask)
+        mask_a = Trial2.frame_mask_a(self.bicycle)
+        mask_b = Trial2.frame_mask_b(self.lidar, bbmask)
 
         # interpolate mask_b from lidar time to bicycle time
         mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
