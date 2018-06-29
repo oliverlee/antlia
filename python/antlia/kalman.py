@@ -536,7 +536,7 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
         if event is not None:
             ax_.plot(event_time[1:],
                      scipy.integrate.cumtrapz(z[:, 2], dx=T) + np.pi,
-                     color=color[3], alpha=0.5,
+                     color=color[3],
                      label='integrated yaw rate')
         ax_.legend()
 
@@ -583,11 +583,11 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
                              color=color[2], alpha=0.2)
         if event is not None:
             ax_.plot(event_time, ff.moving_average(event.bicycle.speed, 55),
-                     color=color[1], alpha=0.5,
+                     color=color[1],
                      label='speed')
             ax_.plot(event_time[1:],
                      scipy.integrate.cumtrapz(z[:, 3], dx=T) + x[0, 3],
-                     color=color[3], alpha=0.5,
+                     color=color[3],
                      label='integrated accel')
             ylim = ax_.get_ylim()
             ax_.plot(event_time, event.bicycle.speed,
@@ -616,7 +616,7 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
         if event is not None:
             ax_.plot(event_time, z[:, 3],
                      zorder=1,
-                     color=color[1], alpha=0.5,
+                     color=color[1],
                      label='acceleration')
         ax_.legend()
     return fig, ax
