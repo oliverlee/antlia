@@ -112,13 +112,13 @@ class EventType(Enum):
 
 class Event(Trial):
     def __init__(self, trial, bicycle_data, lidar_data, period, event_type,
-                 invalid_bb=None):
+                 bbmask=None):
             super().__init__(bicycle_data, period)
             self.trial = trial
             self.lidar = lidar_data
             self.bicycle = self.data
             self.type = event_type
-            self.invalid_bb = invalid_bb
+            self.bbmask = bbmask
 
             self.x = None
             self.y = None
@@ -129,27 +129,19 @@ class Event(Trial):
             self.bb_mask = None
             self.stationary_mask = None
             self.stationary_count = None
-            self._identify_stationary(invalid_bb=invalid_bb)
+            self._identify_stationary(bbmask=bbmask)
 
             self.si = None
             self.steer_slice = None # bicycle time
             #self._identify_steer_slice() # don't run automatically
 
     def _identify_stationary(self, min_zspan=0.7, zscale=0.0005,
-                             hdbscan_kw=None, invalid_bb=None):
+                             hdbscan_kw=None, bbmask=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
 
-        # exclusive apply_bbmask
-        if invalid_bb is not None:
-            if not hasattr(invalid_bb, '__iter__'):
-                invalid_bb = [invalid_bb]
-
-            for m in invalid_bb:
-                if 'xlim' in m and 'ylim' in m:
-                    xmin, xmax = m['xlim']
-                    ymin, ymax = m['ylim']
-                    index = (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax)
-                    x[index] = ma.masked
+        # apply bounding box masks if specified
+        if bbmask is not None:
+            _apply_bbmask(bbmask, x, y)
 
         # use the same mask for x and y
         y.mask = x.mask
@@ -747,31 +739,11 @@ class Event(Trial):
         return fig, ax
 
     def trajectory(self, mode=None, bbmask=None):
-        def apply_bbmask(x, y, bounding_box):
-            mask = np.ones(x.shape, dtype=bool)
-            if 'xlim' in bounding_box:
-                mask &= ((x < bounding_box['xlim'][1]) &
-                         (x > bounding_box['xlim'][0]))
-            if 'ylim' in bounding_box:
-                mask &= ((y < bounding_box['ylim'][1]) &
-                         (y > bounding_box['ylim'][0]))
-            if 'zlim' in bounding_box:
-                mask &= ((self.z < bounding_box['zlim'][1]) &
-                         (self.z > bounding_box['zlim'][0]))
-            x[mask] = np.ma.masked
-            y[mask] = np.ma.masked
-
         # stationary points
         x = self.x.copy()
         y = self.y.copy()
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
-
-        # handle bbmask is passed as an argument
-        if bbmask is None:
-            arg_bbox = []
-        else:
-            arg_bbox = [bbmask]
 
         # determine stationary noise bounding boxes
         stationary_bboxes = []
@@ -784,9 +756,10 @@ class Event(Trial):
                                           'ylim': (mins[1], maxs[1])})
 
         # mask points in specified bounding boxes
-        for bbox in stationary_bboxes + arg_bbox:
-            apply_bbmask(x, y, bbox)
-        apply_bbmask(x, y, OBSTACLE_BB)
+        _apply_bbmask(stationary_bboxes, x, y)
+        _apply_bbmask(OBSTACLE_BB, x, y)
+        if bbmask is not None:
+            _apply_bbmask(bbmask, x, y)
 
         # trajectory points
         xm = x.mean(axis=1)
@@ -866,15 +839,7 @@ class Event(Trial):
             ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
                           label='non-stationary points')
         else:
-            mask = np.ones(x.shape, dtype=bool)
-            if 'xlim' in bbmask:
-                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
-            if 'ylim' in bbmask:
-                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
-            if 'zlim' in bbmask:
-                mask &= ((self.z < bbmask['zlim'][1]) &
-                         (self.z > bbmask['zlim'][0]))
-
+            mask = _apply_bbmask(bbmask, x, y, apply_mask=False)
             ax[0].scatter(x[~mask], y[~mask],
                           s=3, marker='.',
                           color=colors[1],
@@ -1054,7 +1019,7 @@ class Event(Trial):
 
 class Trial2(Trial):
     def __init__(self, record, bicycle_data, lidar_data, period,
-                 invalid_bb=None):
+                 bbmask=None):
             super().__init__(bicycle_data, period)
             self.record = record
             self.bicycle = self.data
@@ -1063,25 +1028,25 @@ class Trial2(Trial):
             self.event_indices = None
             self.event_detection = None
             self.event = None
-            self._detect_event(invalid_bb=invalid_bb)
+            self._detect_event(bbmask=bbmask)
 
     @staticmethod
     def mask_a(bicycle_data):
         return bicycle_data.speed > 0.5
 
     @staticmethod
-    def mask_b(lidar_data, invalid_bb=None):
+    def mask_b(lidar_data, bbmask=None):
         bbplus = lidar_data.cartesian(**VALID_BB)[0].count(axis=1)
 
         # subtract the obstacle
         bbplus -= lidar_data.cartesian(**OBSTACLE_BB)[0].count(axis=1)
 
         mask = bbplus
-        if invalid_bb is not None:
-            if not hasattr(invalid_bb, '__iter__'):
-                invalid_bb = [invalid_bb]
+        if bbmask is not None:
+            if isinstance(bbmask, dict):
+                bbmask = [bbmask]
 
-            for bbminus in invalid_bb:
+            for bbminus in bbmask:
                 mask -= lidar_data.cartesian(**bbminus)[0].count(axis=1)
         return mask > 1
 
@@ -1094,7 +1059,7 @@ class Trial2(Trial):
         assert len(rising) == len(falling)
         return list(zip(rising, falling))
 
-    def _detect_event(self, invalid_bb=None):
+    def _detect_event(self, bbmask=None):
         """Event is detected using two masks, one on the bicycle speed sensor
         and one on the lidar data. Mask A detects when the bicycle speed is
         greater than 0.5. Mask B detects if any object is visible to the lidar,
@@ -1107,12 +1072,12 @@ class Trial2(Trial):
         overtaking) and in the bounding box (-20, 2), (-10, 3.5).
 
         Parameters:
-        invalid_bb: dict or iteratble of dicts, keywords supplied to
-                    lidar.cartesian() for an area to ignore for event detection.
-                    This is used in the event of erroneous lidar data.
+        bbmask: dict or iteratble of dicts, keywords supplied to
+                lidar.cartesian() for an area to ignore for event detection.
+                This is used in the event of erroneous lidar data.
         """
         mask_a = Trial2.mask_a(self.bicycle)
-        mask_b = Trial2.mask_b(self.lidar, invalid_bb)
+        mask_b = Trial2.mask_b(self.lidar, bbmask)
 
         # interpolate mask_b from lidar time to bicycle time
         mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
@@ -1200,4 +1165,30 @@ class Trial2(Trial):
                 self.lidar.frame(lambda t: (t >= t0) & (t < t1)),
                 self.period,
                 event_type,
-                invalid_bb=invalid_bb)
+                bbmask=bbmask)
+
+def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
+    mask = np.zeros(x.shape, dtype=bool)
+
+    if isinstance(bounding_box, dict):
+        bounding_box = [bounding_box]
+
+    for bb in bounding_box:
+        bbmask = np.ones(x.shape, dtype=bool)
+        if 'xlim' in bb:
+            bbmask &= ((x < bb['xlim'][1]) &
+                       (x > bb['xlim'][0]))
+        if 'ylim' in bb:
+            bbmask &= ((y < bb['ylim'][1]) &
+                       (y > bb['ylim'][0]))
+        if 'zlim' in bounding_box:
+            bbmask &= ((z < bb['zlim'][1]) &
+                       (z > bb['zlim'][0]))
+        mask |= bbmask
+
+    if apply_mask:
+        x[mask] = np.ma.masked
+        y[mask] = np.ma.masked
+        if z is not None:
+            z[mask] = np.ma.masked
+    return mask

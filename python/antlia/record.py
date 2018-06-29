@@ -260,8 +260,9 @@ class Record(object):
         missing_sync: array_like of approximate time of missing sync signals
         trial_mask: int or slice or array_like, any valid numpy array index of
                     trial indices to ignore
-        lidar_bbmask: dict, keywords to pass to lidar.cartesian() for a bounding
-                      box to exclude during event detection
+        lidar_bbmask: dict or iterable of dicts, with keywords to pass to
+                      lidar.cartesian() for a bounding box to exclude during
+                      event detection
         offset_calibration: bool, use data when sync is active to calibrate
                             zero offset for bicycle IMU signals.
 
@@ -328,7 +329,7 @@ class Record(object):
                                  bicycle_data,
                                  lidar_data,
                                  self.bicycle_period,
-                                 invalid_bb=lidar_bbmask))
+                                 bbmask=lidar_bbmask))
 
         if len(trials) != 18:
             msg = ('Unexpected number of trials (got {}, not {}).' +
