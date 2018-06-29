@@ -745,12 +745,31 @@ class Event(Trial):
 
         return fig, ax
 
-    def trajectory(self, mode=None):
+    def trajectory(self, mode=None, bbmask=None):
         # stationary points
         x = self.x.copy()
         y = self.y.copy()
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
+
+        # exclude obstacle bbox points
+        mask = np.ones(x.shape, dtype=bool)
+        mask &= (x < OBSTACLE_BB['xlim'][1]) & (x > OBSTACLE_BB['xlim'][0])
+        mask &= (y < OBSTACLE_BB['ylim'][1]) & (y > OBSTACLE_BB['ylim'][0])
+        x[mask] = np.ma.masked
+        y[mask] = np.ma.masked
+
+        if bbmask is not None:
+            mask = np.ones(x.shape, dtype=bool)
+            if 'xlim' in bbmask:
+                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
+            if 'ylim' in bbmask:
+                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
+            if 'zlim' in bbmask:
+                mask &= ((self.z < bbmask['zlim'][1]) &
+                         (self.z > bbmask['zlim'][0]))
+            x[mask] = np.ma.masked
+            y[mask] = np.ma.masked
 
         # trajectory points
         xm = x.mean(axis=1)
@@ -788,12 +807,20 @@ class Event(Trial):
 
         raise ValueError('Unhandled case for mode {}:'.format(mode))
 
-    def plot_trajectory(self, ax=None, **fig_kw):
-        if ax is None:
-            fig, ax = plt.subplots(2, 1, sharex=False, **fig_kw)
+    def plot_trajectory(self, ax=None, plot_vel=True, bbmask=None, **fig_kw):
+        if plot_vel:
+            num_plots = 2
         else:
-            assert len(ax) == 2
+            num_plots = 1
+
+        if ax is None:
+            fig, ax = plt.subplots(num_plots, 1, sharex=False, **fig_kw)
+        else:
+            assert len(ax) == num_plots
             fig = ax[0].get_figure()
+
+        if not plot_vel:
+            ax = [ax]
 
         colors = sns.color_palette('Paired', 12)
 
@@ -809,20 +836,35 @@ class Event(Trial):
         y.mask = self.stationary_mask | self.bb_mask
 
         # non-stationary points
-        ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
-                      label='non-stationary points')
+        if bbmask is None:
+            ax[0].scatter(x, y, s=3, marker='.', color=colors[1],
+                          label='non-stationary points')
+        else:
+            mask = np.ones(x.shape, dtype=bool)
+            if 'xlim' in bbmask:
+                mask &= (x < bbmask['xlim'][1]) & (x > bbmask['xlim'][0])
+            if 'ylim' in bbmask:
+                mask &= (y < bbmask['ylim'][1]) & (y > bbmask['ylim'][0])
+            if 'zlim' in bbmask:
+                mask &= ((self.z < bbmask['zlim'][1]) &
+                         (self.z > bbmask['zlim'][0]))
+
+            ax[0].scatter(x[~mask], y[~mask],
+                          s=3, marker='.',
+                          color=colors[1],
+                          label='non-stationary points')
+            ax[0].scatter(x[mask], y[mask],
+                          s=3, marker='.',
+                          color=colors[0],
+                          label='non-stationary points (masked)')
 
         # trajectory points
-        xm = x.mean(axis=1)
-        ym = y.mean(axis=1)
+        xm, ym = self.trajectory(mode='raw', bbmask=bbmask)
         ax[0].scatter(xm, ym, s=5, edgecolor=colors[5],
                       label='NSP centroid (per frame)')
 
         # interpolated trajectory
-        xm[xm.mask] = np.interp(
-                np.where(xm.mask)[0], np.where(~xm.mask)[0], xm[~xm.mask])
-        ym[ym.mask] = np.interp(
-                np.where(ym.mask)[0], np.where(~ym.mask)[0], ym[~ym.mask])
+        xm, ym = self.trajectory(mode='interp', bbmask=bbmask)
         ax[0].plot(xm, ym, color=colors[4],
                    label='NSP centroid (interpolated)')
 
@@ -836,11 +878,9 @@ class Event(Trial):
         ax[0].plot(butterf(xm), butterf(ym), color=colors[3],
                    label='NSP centroid (filtered, low pass butterworth)')
 
-        handles, labels = ax[0].get_legend_handles_labels()
-        # move first 2 elements to end
-        handles = handles[2:] + handles[:2]
-        lables = labels[2:] + labels[:2]
-        ax[0].legend(handles, labels)
+        ax[0].legend()
+        if not plot_vel:
+            return fig, ax[0]
 
         f = lambda x: np.square(np.diff(x))
         v = lambda x, y: np.sqrt(f(x) + f(y)) / 0.05
