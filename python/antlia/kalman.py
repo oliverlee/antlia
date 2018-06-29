@@ -411,14 +411,43 @@ class Kalman(object):
                 predicted_error_covariance=None)
 
 def plot_kalman_result(result, event=None, smoothed_result=None,
-                       wheelbase=1.0, ax=None, **fig_kw):
+                       wheelbase=1.0, ax_mask=None, ax=None, **fig_kw):
+    if ax_mask is None:
+        # create axes for all plots
+        ax_mask = np.ones((5,), dtype=bool)
+    else:
+        ax_mask = np.asarray(ax_mask).astype(bool)
+        assert ax_mask.shape == (5,)
+
     if ax is None:
-        fig, ax = plt.subplots(3, 2, sharex=True, **fig_kw)
+        n = np.count_nonzero(ax_mask)
+
+        if n == 5:
+            ax_shape = (3, 2)
+            colspan = 2
+        else:
+            ax_shape = (n, 1)
+            colspan = 1
+        fig, ax = plt.subplots(*ax_shape, sharex=True, **fig_kw)
+        ax = ax.ravel()
+
+        if ax_mask[0]: # plot trajectory
+            ax[0].axis('off')
+            if n == 5:
+                ax[1].axis('off')
+                ax = ax[1:]
+            ax[0] = plt.subplot2grid(ax_shape,
+                                     (0, 0),
+                                     rowspan=1,
+                                     colspan=colspan,
+                                     fig=fig)
+
     else:
         fig = ax.get_figure()
-    ax = ax.ravel()
-    ax[0].axis('off')
-    ax[1].axis('off')
+        ax = ax.ravel()
+
+    ax_index = np.cumsum(ax_mask, dtype=int) - ax_mask[0]
+    ax_index[~ax_mask] = ax_mask.size # set unused axes with invalid index
 
     x = result.state_estimate
     P = result.error_covariance
@@ -438,149 +467,158 @@ def plot_kalman_result(result, event=None, smoothed_result=None,
 
     color = sns.color_palette('tab10', 10)
 
-    ax01 = plt.subplot2grid((3, 2), (0, 0), rowspan=1, colspan=2, fig=fig)
-    _x, _y = correct_trajectory(x, wheelbase)
-    ax01.plot(_x, _y,
-              color=color[0], alpha=0.5,
-              label='KF trajectory')
-    ax01.fill_between(_x,
-                      _y + np.sqrt(P[:, 1, 1]),
-                      _y - np.sqrt(P[:, 1, 1]),
-                      color=color[0], alpha=0.2)
-    if event is not None:
-        index = ~z.mask.any(axis=1)
-        ax01.scatter(_x[index],
-                     _y[index],
-                     s=15, marker='X',
-                     color=color[0],
-                     label='KF trajectory (valid measurement)')
-    if smoothed_result is not None:
-        xs = smoothed_result.state_estimate
-        Ps = smoothed_result.error_covariance
-        _x, _y = correct_trajectory(xs, wheelbase)
-        ax01.plot(_x,
-                  _y,
-                  color=color[2], alpha=0.5,
-                  label='KS trajectory')
-        ax01.fill_between(_x,
-                          _y + np.sqrt(Ps[:, 1, 1]),
-                          _y - np.sqrt(Ps[:, 1, 1]),
-                          color=color[2], alpha=0.2)
+    if ax_mask[0]: # plot trajectory
+        ax_ = ax[ax_index[0]]
+        _x, _y = correct_trajectory(x, wheelbase)
+        ax_.plot(_x, _y,
+                 color=color[0], alpha=0.5,
+                 label='KF trajectory')
+        ax_.fill_between(_x,
+                         _y + np.sqrt(P[:, 1, 1]),
+                         _y - np.sqrt(P[:, 1, 1]),
+                         color=color[0], alpha=0.2)
         if event is not None:
-            ax01.scatter(_x[index],
-                         _y[index],
+            index = ~z.mask.any(axis=1)
+            ax_.scatter(_x[index],
+                        _y[index],
+                        s=15, marker='X',
+                        color=color[0],
+                        label='KF trajectory (valid measurement)')
+        if smoothed_result is not None:
+            xs = smoothed_result.state_estimate
+            Ps = smoothed_result.error_covariance
+            _x, _y = correct_trajectory(xs, wheelbase)
+            ax_.plot(_x,
+                     _y,
+                     color=color[2], alpha=0.5,
+                     label='KS trajectory')
+            ax_.fill_between(_x,
+                             _y + np.sqrt(Ps[:, 1, 1]),
+                             _y - np.sqrt(Ps[:, 1, 1]),
+                             color=color[2], alpha=0.2)
+            if event is not None:
+                ax_.scatter(_x[index],
+                            _y[index],
+                            s=15, marker='X',
+                            color=color[2],
+                            label='KS trajectory (valid measurement)')
+        if event is not None:
+            ax_.scatter(z[:, 0].compressed(),
+                         z[:, 1].compressed(),
                          s=15, marker='X',
-                         color=color[2],
-                         label='KS trajectory (valid measurement)')
-    if event is not None:
-        ax01.scatter(z[:, 0].compressed(),
-                      z[:, 1].compressed(),
-                      s=15, marker='X',
-                      color=color[1], alpha=0.5,
-                      label='trajectory (butter)')
-        ax01.scatter(event.x,
-                     event.y,
-                     s=1, marker='.',
-                     zorder=0,
-                     color=color[6], alpha=0.5,
-                     label='lidar point cloud')
-    ax01.legend()
+                         color=color[1], alpha=0.5,
+                         label='trajectory (butter)')
+            ax_.scatter(event.x,
+                        event.y,
+                        s=1, marker='.',
+                        zorder=0,
+                        color=color[6], alpha=0.5,
+                        label='lidar point cloud')
+        ax_.legend()
 
-    ax[2].plot(event_time, x[:, 2],
-               color=color[0],
-               label='KF yaw angle')
-    ax[2].fill_between(event_time,
-                       x[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
-                       x[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
-                       color=color[0], alpha=0.2)
-    if smoothed_result is not None:
-        ax[2].plot(event_time, xs[:, 2],
-                   color=color[2],
-                   label='KS yaw angle')
-        ax[2].fill_between(event_time,
-                           xs[:, 2].squeeze() + np.sqrt(Ps[:, 2, 2]),
-                           xs[:, 2].squeeze() - np.sqrt(Ps[:, 2, 2]),
-                           color=color[2], alpha=0.2)
-    if event is not None:
-        ax[2].plot(event_time[1:],
-                   scipy.integrate.cumtrapz(z[:, 2], dx=T) + np.pi,
-                   color=color[3], alpha=0.5,
-                   label='integrated yaw rate')
-    ax[2].legend()
+    if ax_mask[1]: # plot yaw angle
+        ax_ = ax[ax_index[1]]
+        ax_.plot(event_time, x[:, 2],
+                 color=color[0],
+                 label='KF yaw angle')
+        ax_.fill_between(event_time,
+                         x[:, 2].squeeze() + np.sqrt(P[:, 2, 2]),
+                         x[:, 2].squeeze() - np.sqrt(P[:, 2, 2]),
+                         color=color[0], alpha=0.2)
+        if smoothed_result is not None:
+            ax_.plot(event_time, xs[:, 2],
+                     color=color[2],
+                     label='KS yaw angle')
+            ax_.fill_between(event_time,
+                             xs[:, 2].squeeze() + np.sqrt(Ps[:, 2, 2]),
+                             xs[:, 2].squeeze() - np.sqrt(Ps[:, 2, 2]),
+                             color=color[2], alpha=0.2)
+        if event is not None:
+            ax_.plot(event_time[1:],
+                     scipy.integrate.cumtrapz(z[:, 2], dx=T) + np.pi,
+                     color=color[3], alpha=0.5,
+                     label='integrated yaw rate')
+        ax_.legend()
 
-    ax[3].plot(event_time, x[:, 4],
-               color=color[0],
-               label='KF yaw rate')
-    ax[3].fill_between(event_time,
-                       x[:, 4].squeeze() + np.sqrt(P[:, 4, 4]),
-                       x[:, 4].squeeze() - np.sqrt(P[:, 4, 4]),
-                       color=color[0], alpha=0.2)
-    if smoothed_result is not None:
-        ax[3].plot(event_time, xs[:, 4],
-                   color=color[2],
-                   label='KS yaw rate')
-        ax[3].fill_between(event_time,
-                           xs[:, 4].squeeze() + np.sqrt(Ps[:, 4, 4]),
-                           xs[:, 4].squeeze() - np.sqrt(Ps[:, 4, 4]),
-                           color=color[2], alpha=0.2)
-    if event is not None:
-        ax[3].plot(event_time, z[:, 2],
-                   color=color[1], alpha=0.5,
-                   label='yaw rate')
-    ax[3].legend()
+    if ax_mask[2]: # plot yaw rate
+        ax_ = ax[ax_index[2]]
+        ax_.plot(event_time, x[:, 4],
+                 color=color[0],
+                 label='KF yaw rate')
+        ax_.fill_between(event_time,
+                         x[:, 4].squeeze() + np.sqrt(P[:, 4, 4]),
+                         x[:, 4].squeeze() - np.sqrt(P[:, 4, 4]),
+                         color=color[0], alpha=0.2)
+        if smoothed_result is not None:
+            ax_.plot(event_time, xs[:, 4],
+                     color=color[2],
+                     label='KS yaw rate')
+            ax_.fill_between(event_time,
+                             xs[:, 4].squeeze() + np.sqrt(Ps[:, 4, 4]),
+                             xs[:, 4].squeeze() - np.sqrt(Ps[:, 4, 4]),
+                             color=color[2], alpha=0.2)
+        if event is not None:
+            ax_.plot(event_time, z[:, 2],
+                     color=color[1], alpha=0.5,
+                     label='yaw rate')
+        ax_.legend()
 
-    ax[4].plot(event_time, x[:, 3],
-               color=color[0],
-               label='KF speed')
-    ax[4].fill_between(event_time,
-                       x[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
-                       x[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
-                       color=color[0], alpha=0.2)
-    ax[4].axhline(0, color='black')
-    ylim = ax[4].get_ylim()
-    if smoothed_result is not None:
-        ax[4].plot(event_time, xs[:, 3],
-                   color=color[2],
-                   label='KS speed')
-        ax[4].fill_between(event_time,
-                           xs[:, 3].squeeze() + np.sqrt(Ps[:, 3, 3]),
-                           xs[:, 3].squeeze() - np.sqrt(Ps[:, 3, 3]),
-                           color=color[2], alpha=0.2)
-    if event is not None:
-        ax[4].plot(event_time, ff.moving_average(event.bicycle.speed, 55),
-                   color=color[1], alpha=0.5,
-                   label='speed')
-        ax[4].plot(event_time[1:],
-                   scipy.integrate.cumtrapz(z[:, 3], dx=T) + x[0, 3],
-                   color=color[3], alpha=0.5,
-                   label='integrated accel')
-        ax[4].plot(event_time, event.bicycle.speed,
-                   color=color[1], alpha=0.2,
-                   label='speed (raw)')
-    ax[4].set_ylim(ylim)
-    ax[4].legend()
+    if ax_mask[3]: # plot speed
+        ax_ = ax[ax_index[3]]
+        ax_.plot(event_time, x[:, 3],
+                 color=color[0],
+                 label='KF speed')
+        ax_.fill_between(event_time,
+                         x[:, 3].squeeze() + np.sqrt(P[:, 3, 3]),
+                         x[:, 3].squeeze() - np.sqrt(P[:, 3, 3]),
+                         color=color[0], alpha=0.2)
+        ax_.axhline(0, color='black')
+        if smoothed_result is not None:
+            ax_.plot(event_time, xs[:, 3],
+                     color=color[2],
+                     label='KS speed')
+            ax_.fill_between(event_time,
+                             xs[:, 3].squeeze() + np.sqrt(Ps[:, 3, 3]),
+                             xs[:, 3].squeeze() - np.sqrt(Ps[:, 3, 3]),
+                             color=color[2], alpha=0.2)
+        if event is not None:
+            ax_.plot(event_time, ff.moving_average(event.bicycle.speed, 55),
+                     color=color[1], alpha=0.5,
+                     label='speed')
+            ax_.plot(event_time[1:],
+                     scipy.integrate.cumtrapz(z[:, 3], dx=T) + x[0, 3],
+                     color=color[3], alpha=0.5,
+                     label='integrated accel')
+            ylim = ax_.get_ylim()
+            ax_.plot(event_time, event.bicycle.speed,
+                     color=color[1], alpha=0.2,
+                     label='speed (raw)')
+            ax_.set_ylim(ylim)
+        ax_.legend()
 
-    ax[5].plot(event_time, x[:, 5],
-               zorder=2,
-               color=color[0], label='KF accel')
-    ax[5].fill_between(event_time,
-                       x[:, 5].squeeze() + np.sqrt(P[:, 5, 5]),
-                       x[:, 5].squeeze() - np.sqrt(P[:, 5, 5]),
-                       color=color[0], alpha=0.2)
-    if smoothed_result is not None:
-        ax[5].plot(event_time, xs[:, 5],
-                   zorder=2,
-                   color=color[2], label='KS accel')
-        ax[5].fill_between(event_time,
-                           xs[:, 5].squeeze() + np.sqrt(Ps[:, 5, 5]),
-                           xs[:, 5].squeeze() - np.sqrt(Ps[:, 5, 5]),
-                           color=color[2], alpha=0.2)
-    if event is not None:
-        ax[5].plot(event_time, z[:, 3],
-                   zorder=1,
-                   color=color[1], alpha=0.5,
-                   label='acceleration')
-    ax[5].legend()
+    if ax_mask[4]: # plot acceleration
+        ax_ = ax[ax_index[4]]
+        ax_.plot(event_time, x[:, 5],
+                 zorder=2,
+                 color=color[0], label='KF accel')
+        ax_.fill_between(event_time,
+                         x[:, 5].squeeze() + np.sqrt(P[:, 5, 5]),
+                         x[:, 5].squeeze() - np.sqrt(P[:, 5, 5]),
+                         color=color[0], alpha=0.2)
+        if smoothed_result is not None:
+            ax_.plot(event_time, xs[:, 5],
+                     zorder=2,
+                     color=color[2], label='KS accel')
+            ax_.fill_between(event_time,
+                             xs[:, 5].squeeze() + np.sqrt(Ps[:, 5, 5]),
+                             xs[:, 5].squeeze() - np.sqrt(Ps[:, 5, 5]),
+                             color=color[2], alpha=0.2)
+        if event is not None:
+            ax_.plot(event_time, z[:, 3],
+                     zorder=1,
+                     color=color[1], alpha=0.5,
+                     label='acceleration')
+        ax_.legend()
     return fig, ax
 
 
