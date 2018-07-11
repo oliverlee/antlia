@@ -78,7 +78,7 @@ TRIAL_MASK = [
    0,
    None,
    None,
-   9,
+   [9, 10],
    None,
    None,
    11,
