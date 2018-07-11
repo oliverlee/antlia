@@ -1201,12 +1201,3 @@ class Trial2(Trial):
                 self.period,
                 event_type,
                 invalid_bb=invalid_bb)
-
-def instructed_speed(record_id, trial_id):
-    speed_order = np.r_[12, 17, 22,
-                        12, 22, 17,
-                        17, 12, 22,
-                        17, 22, 12,
-                        22, 12, 17,
-                        22, 17, 12].astype(np.float) / 3.6
-    return np.roll(speed_order, -3*record_id)[trial_id]
