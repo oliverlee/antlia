@@ -141,7 +141,7 @@ class Event(Trial):
 
         # apply bounding box masks if specified
         if bbmask is not None:
-            _apply_bbmask(bbmask, x, y)
+            _apply_bbmask(bbmask, x, y, z)
 
         # rescale z and then use the same mask as x and y
         assert z.shape[0] > 1
@@ -742,6 +742,7 @@ class Event(Trial):
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
+
         # determine stationary noise bounding boxes
         stationary_bboxes = []
         for cluster in self.clusters:
@@ -1033,11 +1034,11 @@ class Trial2(Trial):
 
     @staticmethod
     def frame_mask_b(lidar_data, bbmask=None):
-        x, y = lidar_data.cartesian(**VALID_BB)
+        x, y, z = lidar_data.cartesianz(**VALID_BB)
 
-        _apply_bbmask(OBSTACLE_BB, x, y)
+        _apply_bbmask(OBSTACLE_BB, x, y, z)
         if bbmask is not None:
-            _apply_bbmask(bbmask, x, y)
+            _apply_bbmask(bbmask, x, y, z)
 
         return x.count(axis=1) > 1
 
