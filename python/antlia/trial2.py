@@ -748,6 +748,7 @@ class Event(Trial):
 
     def trajectory(self, mode=None, bbmask=None):
         def apply_bbmask(x, y, bounding_box):
+            mask = np.ones(x.shape, dtype=bool)
             if 'xlim' in bounding_box:
                 mask &= ((x < bounding_box['xlim'][1]) &
                          (x > bounding_box['xlim'][0]))
@@ -767,7 +768,7 @@ class Event(Trial):
         y.mask = self.stationary_mask | self.bb_mask
 
         # handle bbmask is passed as an argument
-        if bbamask is None:
+        if bbmask is None:
             arg_bbox = []
         else:
             arg_bbox = [bbmask]
