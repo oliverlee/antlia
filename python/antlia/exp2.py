@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
 import os
 import pickle
 import numpy as np
@@ -90,10 +89,57 @@ TRIAL_MASK = [
    None
 ]
 
-# one less bicycle log recorded due to logger crash
+## one less bicycle log recorded due to logger crash
 assert len(BICYCLE_LOG_FILES) == len(LIDAR_LOG_FILES) - 1
 assert len(MISSING_SYNC) == len(TRIAL_MASK)
 assert len(BICYCLE_LOG_FILES) == len(MISSING_SYNC)
+
+## trial specific bounding box masks for the following trials:
+## 1, 2
+## 2, 4
+## 3, 12
+## 3, 14
+##
+## time for trial (1, 2) determined from:
+## >> x, y, t = records[1].trials[2].lidar.cartesianz(**trial2.VALID_BB)
+## >> FALL_BBOX = {
+## >>     'xlim': (-5, -2),
+## >>     'ylim': (2.7, 2.8),
+## >> }
+## >> mask = trial2._apply_bbmask(FALL_BBOX, x, y, apply_mask=False)
+## >> t0 = t[mask][0]
+## >> print (t0, t.max() + 1)
+## 291.103905916 325.454327583
+
+TRIAL_BBMASK = {
+    (1, 2): {
+        'xlim': (-5, -2.5),
+        'ylim': (0, 10),
+        'zlim': (291.103905916, 325),
+    },
+    (2, 4): {
+        'xlim': (30, 40),
+        'ylim': (0, 4),
+    },
+    (3, 12): [
+        {
+            'xlim': (-20, 10),
+            'ylim': (0, 1.5),
+        },
+        {
+            'xlim': (0, 10),
+            'ylim': (0, 1.8),
+        },
+        {
+            'xlim': (5, 40),
+            'ylim': (0, 2.1),
+        }
+    ],
+    (3, 14): {
+        'xlim': (10, 40),
+        'ylim': (0, 2.6),
+    }
+}
 
 
 def load_records(index=None, data_dir=None):
@@ -122,6 +168,14 @@ def load_records(index=None, data_dir=None):
     if index is not None:
         exp_index = exp_index[index]
 
+    # determine which trials have specific bounding boxes
+    trial_bbkeys = {}
+    for i, j in TRIAL_BBMASK.keys():
+        if i in exp_index:
+            l = trial_bbkeys.get(i, [])
+            l.append((i, j))
+            trial_bbkeys[i] = l
+
     for i in exp_index:
         # create record from lidar and bicycle logs
         r = record.Record(
@@ -135,6 +189,13 @@ def load_records(index=None, data_dir=None):
         r.sync()
         r._calculate_trials2(missing_sync=MISSING_SYNC[i],
                              trial_mask=TRIAL_MASK[i])
+
+        # recalculate event detection if required
+        if i in trial_bbkeys:
+            for key in trial_bbkeys[i]:
+                rider_id, trial_id = key
+                assert i == rider_id
+                r.trials[trial_id]._detect_event(TRIAL_BBMASK[key])
 
         # append processed record
         exp_records.append(r)
