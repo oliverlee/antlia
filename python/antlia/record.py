@@ -596,36 +596,54 @@ class Record(object):
             assert len(ax) == 3
             fig = ax[0].get_figure()
 
+        def apply_clumps_index(shape, clumps):
+            index = np.zeros(shape, dtype=bool)
+            for c in clumps:
+                index[c] = True
+            return index
+
         i = 0
         colors = sns.color_palette('Paired', 12)
         for tr in self.trials:
-            i = i ^ 1
-            ax[0].plot(tr.data.time, tr.data.speed, color=colors[i])
-
-            ax[1].plot(tr.data.time, tr.event_detection.mask_a, color=colors[i])
-            ax[2].plot(tr.data.time, tr.event_detection.mask_b, color=colors[i])
-
             t0, t1 = tr.event.bicycle.time[[0, -1]]
-            ax[0].axvspan(t0, t1, color=colors[5], alpha=0.5)
-            ax[1].axvspan(t0, t1, color=colors[5], alpha=0.5)
-            ax[2].axvspan(t0, t1, color=colors[5], alpha=0.5)
+            ax[0].axvspan(t0, t1, color=colors[5], alpha=0.3)
+            ax[1].axvspan(t0, t1, color=colors[5], alpha=0.3)
+            ax[2].axvspan(t0, t1, color=colors[5], alpha=0.3)
 
-            # cyclist enters from right
+            # alternate colors between trials
+            i = i ^ 1
+            ax[0].plot(tr.bicycle.time, tr.bicycle.speed, color=colors[i])
+
+            shape = tr.lidar.time.shape
+            ax[1].plot(tr.lidar.time,
+                       apply_clumps_index(shape,
+                                          tr.event_detection.valid_clumps),
+                       color=colors[i])
+
+            # cyclist entry
             ax[2].plot(tr.lidar.time,
-                       tr.lidar.cartesian(**trial2.ENTRY_BB)[0].count(axis=1) > 1,
+                       apply_clumps_index(shape,
+                                          tr.event_detection.entry_clumps),
                        color=colors[6])
 
-            # cyclist exist at left
+            # cyclist exit
             ax[2].plot(tr.lidar.time,
-                       tr.lidar.cartesian(**trial2.EXIT_BB)[0].count(axis=1) > 1,
+                       apply_clumps_index(shape,
+                                          tr.event_detection.exit_steer_clumps),
+                       linestyle='--',
+                       color=colors[8])
+            ax[2].plot(tr.lidar.time,
+                       apply_clumps_index(shape,
+                                          tr.event_detection.exit_brake_clumps),
+                       linestyle='-.',
                        color=colors[8])
 
         ax[1].plot(self.bicycle.time, self.bicycle.sync, color=colors[3])
         ax[2].plot(self.bicycle.time, self.bicycle.sync, color=colors[3])
 
         ax[0].set_ylabel('velocity')
-        ax[1].set_ylabel('mask a')
-        ax[2].set_ylabel('mask b')
+        ax[1].set_ylabel('valid bbox detection')
+        ax[2].set_ylabel('entry/exit bbox detection')
         ax[2].set_xlabel('time')
 
         return fig, ax
