@@ -1107,15 +1107,20 @@ class Trial2(Trial):
             # using the rising edge of the first clump within the event slice
             # steering exit conditions are prioritized over braking exit conditions
             exit_steer_clumps = bbox_clumps(EXIT_BB_STEER)
-            exit_brake_clumps = bbox_clumps(EXIT_BB_BRAKE)
+
+            if exit_steer_clumps:
+                event_type = EventType.Overtaking
+                exit_brake_clumps = []
+            else:
+                event_type = EventType.Braking
+                exit_brake_clumps = bbox_clumps(EXIT_BB_BRAKE)
+
             c = first_clump_in_slice(exit_steer_clumps, event_index, 'start')
             exit_time = None
             if c is not None:
-                event_type = EventType.Overtaking
                 event_index = slice(event_index.start, c.start)
                 exit_time = self.lidar.time[c.start]
             else:
-                event_type = EventType.Braking
                 c = first_clump_in_slice(exit_brake_clumps, event_index, 'start')
                 if c is not None:
                     event_index = slice(event_index.start, c.start)
