@@ -80,9 +80,16 @@ def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
                                           window_size, window_size/2)
     filtered_acceleration = ff.moving_average(trial['accelerometer x'],
                                               window_size, window_size/2)
-    b0, b1 = braking_range = get_trial_braking_indices(filtered_acceleration,
-                                                       braking_threshold,
-                                                       min_size)[0]
+    braking_range = get_trial_braking_indices(filtered_acceleration,
+                                              braking_threshold,
+                                              min_size)[0]
+    try:
+        b0, b1 = braking_range = get_trial_braking_indices(filtered_acceleration,
+                                                           braking_threshold,
+                                                           min_size)[0]
+    except TypeError:
+        # handle 'slice' object
+        b0, b1 = braking_range = (braking_range.start, braking_range.stop)
     b1 -= 1
 
     # determine if wheel lockup occurs
