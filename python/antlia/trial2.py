@@ -1069,9 +1069,7 @@ class Trial2(Trial):
         event_clumps = [c for c in event_clumps
                         if c.stop - c.start > MIN_TIME_DURATION]
 
-        # use last clump for the event
         assert len(event_clumps) > 0, "unable to detect event for this trial"
-        event_index = event_clumps[-1]
 
         # reduce span of event using entry and exit bounding box detection
         def bbox_clumps(bbox):
@@ -1092,48 +1090,55 @@ class Trial2(Trial):
                         return c
             return None
 
-        # find time where cyclist enters lidar vision
-        # use falling edge of first entry clump within the event slice
-        entry_clumps = bbox_clumps(ENTRY_BB)
-        c = first_clump_in_slice(entry_clumps, event_index, 'stop')
-        entry_time = None
-        if c is not None:
-            event_index = slice(c.stop, event_index.stop)
-            entry_time = self.lidar.time[c.stop]
-        else:
+        # use last clump for the event
+        # search backwards in event clumps for entry/exit conditions
+        for event_index in event_clumps[::-1]:
+
+            # find time where cyclist enters lidar vision
+            # use falling edge of first entry clump within the event slice
+            entry_clumps = bbox_clumps(ENTRY_BB)
+            c = first_clump_in_slice(entry_clumps, event_index, 'stop')
+            entry_time = None
+            if c is not None:
+                event_index = slice(c.stop, event_index.stop)
+                entry_time = self.lidar.time[c.stop]
+
+            # find time where cyclist has finished overtaking obstacle, if it exists
+            # using the rising edge of the first clump within the event slice
+            # steering exit conditions are prioritized over braking exit conditions
+            exit_steer_clumps = bbox_clumps(EXIT_BB_STEER)
+            exit_brake_clumps = bbox_clumps(EXIT_BB_BRAKE)
+            c = first_clump_in_slice(exit_steer_clumps, event_index, 'start')
+            exit_time = None
+            if c is not None:
+                event_type = EventType.Overtaking
+                event_index = slice(event_index.start, c.start)
+                exit_time = self.lidar.time[c.start]
+            else:
+                event_type = EventType.Braking
+                c = first_clump_in_slice(exit_brake_clumps, event_index, 'start')
+                if c is not None:
+                    event_index = slice(event_index.start, c.start)
+                    exit_time = self.lidar.time[c.start]
+
+            if entry_time is not None and exit_time is not None:
+                # event found, otherwise check next event clump
+                break
+
+        if entry_time is None:
+            entry_time = self.lidar.time[event_index.start]
             msg = 'Unable to detect cyclist entry for event starting at '
             msg += 't = {0:.3f} seconds'.format(
                     self.lidar.time[event_index.start])
             warnings.warn(msg, UserWarning)
 
-        # find time where cyclist has finished overtaking obstacle, if it exists
-        # using the rising edge of the first clump within the event slice
-        # steering exit conditions are prioritized over braking exit conditions
-        exit_steer_clumps = bbox_clumps(EXIT_BB_STEER)
-        exit_brake_clumps = bbox_clumps(EXIT_BB_BRAKE)
-        c = first_clump_in_slice(exit_steer_clumps, event_index, 'start')
-        exit_time = None
-        if c is not None:
-            event_type = EventType.Overtaking
-            event_index = slice(event_index.start, c.start)
-            exit_time = self.lidar.time[c.start]
-        else:
-            event_type = EventType.Braking
-            c = first_clump_in_slice(exit_brake_clumps, event_index, 'start')
-            if c is not None:
-                event_index = slice(event_index.start, c.start)
-                exit_time = self.lidar.time[c.start]
-            else:
-                msg = 'Unable to detect cyclist exit or braking for event '
-                msg += 'ending at t = '
-                msg += '{0:.3f} seconds'.format(
-                        self.lidar.time[event_index.stop - 1])
-                warnings.warn(msg, UserWarning)
-
-        if entry_time is None:
-            entry_time = self.lidar.time[event_index.start]
         if exit_time is None:
             exit_time = self.lidar.time[event_index.stop - 1]
+            msg = 'Unable to detect cyclist exit or braking for event '
+            msg += 'ending at t = '
+            msg += '{0:.3f} seconds'.format(
+                    self.lidar.time[event_index.stop - 1])
+            warnings.warn(msg, UserWarning)
 
         self.event_detection = EventDetectionData(
             valid_clumps=event_clumps,
