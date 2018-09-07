@@ -1075,7 +1075,8 @@ class Trial2(Trial):
         event_clumps = [c for c in event_clumps
                         if c.stop - c.start > MIN_TIME_DURATION]
 
-        assert len(event_clumps) > 0, "unable to detect event for this trial"
+        msg = "unable to detect event for this trial (count = {})".format(count)
+        assert len(event_clumps) > 0, msg
 
         # reduce span of event using entry and exit bounding box detection
         def bbox_clumps(bbox, slice_):
