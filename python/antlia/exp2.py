@@ -196,7 +196,8 @@ def load_records(index=None, data_dir=None, verbose=False):
 
         # synchronize records and detect trials
         r.sync()
-        r._calculate_trials2(missing_sync=MISSING_SYNC[i],
+        r._calculate_trials2(instructed_record_eventtypes(i),
+                             missing_sync=MISSING_SYNC[i],
                              trial_mask=TRIAL_MASK[i])
 
         # recalculate event detection if required
@@ -204,7 +205,8 @@ def load_records(index=None, data_dir=None, verbose=False):
             for key in trial_bbkeys[i]:
                 rider_id, trial_id = key
                 assert i == rider_id
-                r.trials[trial_id]._detect_event(TRIAL_BBMASK[key])
+                r.trials[trial_id]._detect_event(instructed_eventtype(*key),
+                                                 TRIAL_BBMASK[key])
 
         # append processed record
         exp_records.append(r)
@@ -234,3 +236,23 @@ def instructed_eventtype(record_id, trial_id):
         return trial2.EventType.Braking
 
     return trial2.EventType((((trial_id // 3) % 2) + (record_id % 2)) % 2)
+
+def instructed_record_eventtypes(record_id):
+    """Return array of instructed event types for experiment record.
+    """
+    types = [0, 0, 0,
+             1, 1, 1,
+             0, 0, 0,
+             1, 1, 1,
+             0, 0, 0,
+             1, 1, 1]
+    types = np.array([trial2.EventType(t) for t in types])
+
+    if (record_id % 2) == 1:
+        types = np.roll(types, 3)
+
+    # special case due to error during data collection
+    if record_id == 5:
+        types[16] = trial2.EventType.Braking
+
+    return types

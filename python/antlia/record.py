@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import collections
 import glob
 import itertools
 import os
@@ -247,7 +248,8 @@ class Record(object):
         b, a = scipy.signal.cheby1(order, apass, wn)
         return scipy.signal.filtfilt(b, a, x)
 
-    def _calculate_trials2(self, missing_sync=None,
+    def _calculate_trials2(self, event_types,
+                           missing_sync=None,
                            trial_mask=None,
                            lidar_bbmask=None,
                            offset_calibration=True):
@@ -257,6 +259,11 @@ class Record(object):
         This is used with data collected in Gothenburg April 2018.
 
         Parameters:
+        event_types: trial2.EventType or array_like of trial2.EventType
+                     specifying event type for each trial. If a single
+                     trial.EventType is passed, the value is used for the first
+                     trial and the rest are assumed from the standard type
+                     pattern.
         missing_sync: array_like of approximate time of missing sync signals
         trial_mask: int or slice or array_like, any valid numpy array index of
                     trial indices to ignore
@@ -274,6 +281,7 @@ class Record(object):
         > r = Record(lidar_record, bicycle_record)
         > r.sync()
         > r._calculate_trials2(
+              trial2.EventType.Braking,
               missing_sync=[650],
               skip_trial=0)
         """
@@ -312,8 +320,13 @@ class Record(object):
             selectors[trial_mask] = 0
             trial_indices = itertools.compress(trial_indices, selectors)
 
+        # create a list of event_types if necessary
+        if not isinstance(event_types, collections.Iterable):
+            from antlia import exp2
+            event_types = exp2.instructed_record_eventtypes(event_types.value)
+
         trials = []
-        for i0, i1 in trial_indices:
+        for (i0, i1), event_type in zip(trial_indices, event_types):
             i1 += 1 # add extra index to improve viewing of braking in plots
             time0 = self.bicycle.time[i0]
             time1 = self.bicycle.time[i1]
@@ -329,6 +342,7 @@ class Record(object):
                                  bicycle_data,
                                  lidar_data,
                                  self.bicycle_period,
+                                 event_type,
                                  bbmask=lidar_bbmask))
 
         if len(trials) != 18:
