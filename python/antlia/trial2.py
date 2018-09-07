@@ -1034,14 +1034,16 @@ class Trial2(Trial):
             self._detect_event(bbmask=bbmask)
 
     @staticmethod
-    def detect_valid_index(lidar_data, bbmask=None):
+    def detect_valid_index(lidar_data, bbmask=None, count=None):
         x, y, z = lidar_data.cartesianz(**VALID_BB)
 
         _apply_bbmask(OBSTACLE_BB, x, y, z)
         if bbmask is not None:
             _apply_bbmask(bbmask, x, y, z)
 
-        return x.count(axis=1) > 1
+        if count is None:
+            count = 1
+        return x.count(axis=1) > count
 
     def _detect_event(self, bbmask=None):
         """The event is detected using the following masks: VALID_BB, ENTRY_BB,
@@ -1057,10 +1059,18 @@ class Trial2(Trial):
                 This is used in the event of erroneous lidar data.
         """
         # determine event indices from lidar data
-        valid_index = Trial2.detect_valid_index(self.lidar, bbmask)
+        # increase the count threshold if all indices are valid
+        count = 1
+        while True:
+            valid_index = Trial2.detect_valid_index(self.lidar, bbmask, count)
+
+            # require at least 20% of indices to be non-valid
+            if np.sum(valid_index)/valid_index.size < 0.8:
+                break
+            count += 1
         event_clumps = np.ma.extras._ezclump(valid_index)
 
-        # filter out events with a minimum size and minimum average speed
+        # filter out events with a minimum size
         MIN_TIME_DURATION = int(5.5/np.diff(self.lidar.time).mean()) # in samples
         event_clumps = [c for c in event_clumps
                         if c.stop - c.start > MIN_TIME_DURATION]
