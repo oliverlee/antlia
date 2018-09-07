@@ -65,7 +65,7 @@ BrakeEventLinearFitParameters = namedtuple(
          'linregress_stderr'])
 
 ENTRY_BB = {
-    'xlim': (20, 25),
+    'xlim': (18, 25),
     'ylim': (2.5, 3.5)
 }
 EXIT_BB_BRAKE = {
@@ -1044,16 +1044,12 @@ class Trial2(Trial):
         return x.count(axis=1) > 1
 
     def _detect_event(self, bbmask=None):
-        """Event is detected using two masks, one on the bicycle speed sensor
-        and one on the lidar data. Mask A detects when the bicycle speed is
-        greater than 0.5. Mask B detects if any object is visible to the lidar,
-        within the bounding box specified by (-20, 1.0) and (60, 3.5) with
-        respect to the lidar reference frame. The obstacle is ignored with the
-        use of a negative bounding box.
-
-        This region is then further reduced by detecting the cyclist appearing
-        in the bounding box (20, 2), (50, 3.5) and (possibly, in the case of
-        overtaking) and in the bounding box (-20, 2), (-10, 3.5).
+        """The event is detected using the following masks: VALID_BB, ENTRY_BB,
+        EXIT_BB_BRAKE, and EXIT_BB_STEER. Candidates for the event are first
+        determined detecting the cyclist withing VALID_BB. The candidates are
+        searched for ENTRY_BB and EXIT_BB_BRAKE, EXIT_BB_STEER to determine the
+        most likely event. Detection of the cyclist in EXIT_BB_STEER is higher
+        precedence than EXIT_BB_BRAKE and determines the event type.
 
         Parameters:
         bbmask: dict or iteratble of dicts, keywords supplied to
@@ -1072,8 +1068,13 @@ class Trial2(Trial):
         assert len(event_clumps) > 0, "unable to detect event for this trial"
 
         # reduce span of event using entry and exit bounding box detection
-        def bbox_clumps(bbox):
+        def bbox_clumps(bbox, slice_):
             index = self.lidar.cartesian(**bbox)[0].count(axis=1) > 1
+
+            mask = np.zeros(index.shape, dtype=bool)
+            mask[slice_.start:slice_.stop] = True
+
+            index &= mask
             return np.ma.extras._ezclump(index)
 
         def first_clump_in_slice(clumps, slice_, clump_edge=None):
@@ -1096,7 +1097,7 @@ class Trial2(Trial):
 
             # find time where cyclist enters lidar vision
             # use falling edge of first entry clump within the event slice
-            entry_clumps = bbox_clumps(ENTRY_BB)
+            entry_clumps = bbox_clumps(ENTRY_BB, event_index)
             c = first_clump_in_slice(entry_clumps, event_index, 'stop')
             entry_time = None
             if c is not None:
@@ -1106,14 +1107,14 @@ class Trial2(Trial):
             # find time where cyclist has finished overtaking obstacle, if it exists
             # using the rising edge of the first clump within the event slice
             # steering exit conditions are prioritized over braking exit conditions
-            exit_steer_clumps = bbox_clumps(EXIT_BB_STEER)
+            exit_steer_clumps = bbox_clumps(EXIT_BB_STEER, event_index)
 
             if exit_steer_clumps:
                 event_type = EventType.Overtaking
                 exit_brake_clumps = []
             else:
                 event_type = EventType.Braking
-                exit_brake_clumps = bbox_clumps(EXIT_BB_BRAKE)
+                exit_brake_clumps = bbox_clumps(EXIT_BB_BRAKE, event_index)
 
             c = first_clump_in_slice(exit_steer_clumps, event_index, 'start')
             exit_time = None
