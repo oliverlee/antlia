@@ -751,7 +751,6 @@ class Event(Trial):
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
-
         # determine stationary noise bounding boxes
         stationary_bboxes = []
         for cluster in self.clusters:
