@@ -224,8 +224,12 @@ class Event(Trial):
 
             # (non-noise) clusters with large zspan
             stationary = (label != -1 and
-                          (zspan(index) > min_zspan*z.shape[0]) and
-                          (xspan(index) < 1))
+                          ((zspan(index) > min_zspan*z.shape[0]) or
+                           ((zspan(index) > 0.3*z.shape[0]) and
+                            (area(X[index]) < 0.001))))
+
+            if stationary and xspan(index) > 1 and area(X[index]) > area_limit:
+                stationary = False
 
             # If the xy area is large, part of the cyclist trajectory has been
             # grouped into this cluster and we must manually split it.
