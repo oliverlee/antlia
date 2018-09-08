@@ -28,7 +28,8 @@ EventDetectionData = namedtuple(
 
 ClusterData = namedtuple(
         'ClusterData',
-        ['label', 'index', 'zmean', 'zspan', 'count', 'area', 'stationary'])
+        ['label', 'index', 'zmean', 'zspan', 'xspan', 'yspan',
+         'count', 'area', 'stationary'])
 
 FakeHdb = namedtuple(
         'FakeHdb',
@@ -214,6 +215,8 @@ class Event(Trial):
         area = lambda x: x[:, :2].ptp(axis=0).prod()
         zmean = lambda i: X[i, 2].mean()
         zspan = lambda i: len(set(X[i, 2]))
+        xspan = lambda i: np.max(X[i, 0]) - np.min(X[i, 0])
+        yspan = lambda i: np.max(X[i, 1]) - np.min(X[i, 1])
 
         extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
@@ -225,9 +228,12 @@ class Event(Trial):
                            (zspan(index) > 0.3*z.shape[0] and
                             area(X[index]) < area_limit)))
 
-            # if the xy area is large, part of the cyclist trajectory has been
-            # grouped into this cluster and we must manually split it
-            if stationary and area(X[index]) > area_limit:
+            # If the xy area is large, part of the cyclist trajectory has been
+            # grouped into this cluster and we must manually split it.
+            # This may require multiple splits and we hardcode a limit of 3
+            # iterations.
+            split_counter = 0
+            while stationary and area(X[index]) > area_limit:
                 # determine which set has a smaller xy area/bounding box
                 Xj = None
                 min_area = None
@@ -247,6 +253,14 @@ class Event(Trial):
                 xmin, ymin, _ = Xj.min(axis=0)
                 xmax, ymax, _ = Xj.max(axis=0)
 
+                # increase bounding box by 10% in x/y directions
+                dx = xmax - xmin
+                dy = ymax - ymin
+                xmin -= 0.05*dx
+                xmax += 0.05*dx
+                ymin -= 0.05*dy
+                ymax += 0.05*dy
+
                 # track indices with a masked array
                 Y = np.ma.masked_array(X)
                 Y[~index] = np.ma.masked
@@ -260,11 +274,17 @@ class Event(Trial):
                 Y[within] = np.ma.masked
                 extra_cluster_index |= ~Y.mask[:, 0]
 
+                split_counter += 1
+                if split_counter >= 3:
+                    break
+
             cluster_data.append(ClusterData(
                 label,
                 index,
                 zmean(index),
                 zspan(index),
+                xspan(index),
+                yspan(index),
                 np.count_nonzero(index),
                 area(X[index]),
                 stationary))
@@ -282,6 +302,8 @@ class Event(Trial):
                 index,
                 zmean(index),
                 zspan(index),
+                xspan(index),
+                yspan(index),
                 np.count_nonzero(index),
                 area(X[index]),
                 False))
