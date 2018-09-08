@@ -101,24 +101,14 @@ assert len(BICYCLE_LOG_FILES) == len(MISSING_SYNC)
 ## 3, 12
 ## 3, 14
 ##
-## time for trial (1, 2) determined from:
-## >> x, y, t = records[1].trials[2].lidar.cartesianz(**trial2.VALID_BB)
-## >> FALL_BBOX = {
-## >>     'xlim': (-5, -2),
-## >>     'ylim': (2.7, 2.8),
-## >> }
-## >> mask = trial2._apply_bbmask(FALL_BBOX, x, y, apply_mask=False)
-## >> t0 = t[mask][0]
-## >> print (t0, t.max() + 1)
-## 291.103905916 325.454327583
+## time for trial (1, 2) determined manually
 
 TRIAL_BBMASK = {
-    #disable 1-2 trial bbmask
-    #(1, 2): {
-    #    'xlim': (-5, -2.5),
-    #    'ylim': (0, 10),
-    #    'zlim': (291.103905916, 325),
-    #},
+    (1, 2): {
+        'xlim': (-5, -2.5),
+        'ylim': (0, 10),
+        'zlim': (291.5, 325),
+    },
     (2, 4): {
         'xlim': (30, 40),
         'ylim': (0, 4),
