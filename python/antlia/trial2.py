@@ -189,7 +189,7 @@ class Event(Trial):
         cluster_labels = list(set(hdb.labels_))
 
         # change parameters to get fewer clusters
-        if len(cluster_labels) > 100:
+        if len(cluster_labels) > 80:
             hdbscan_kw['min_cluster_size'] = 60
             hdbscan_kw['min_samples'] = 40
             hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
@@ -224,9 +224,8 @@ class Event(Trial):
 
             # (non-noise) clusters with large zspan
             stationary = (label != -1 and
-                          (zspan(index) > min_zspan*z.shape[0] or
-                           (zspan(index) > 0.3*z.shape[0] and
-                            area(X[index]) < area_limit)))
+                          (zspan(index) > min_zspan*z.shape[0]) and
+                          (xspan(index) < 1))
 
             # If the xy area is large, part of the cyclist trajectory has been
             # grouped into this cluster and we must manually split it.
