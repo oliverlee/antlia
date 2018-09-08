@@ -6,6 +6,7 @@ import pickle
 import numpy as np
 
 from antlia import dtype
+from antlia import kalman
 from antlia import record
 from antlia import trial2
 
@@ -205,6 +206,69 @@ def load_records(index=None, data_dir=None, verbose=False):
                 LIDAR_LOG_FILES[i], BICYCLE_LOG_FILES[i]))
 
     return exp_records
+
+
+def _estimate_state(records, record_ids=None):
+    # generate Kalman matrices
+    f, h, F, H = kalman.generate_fhFH(constant_velocity=True,
+                                      wheelbase=0.6) #TODO verify
+
+    T = 1/125 # bicycle sample rate
+    q0 = 1 # weight factor for translation-related states
+    q1 = 0.01 # weight factor for rotation-related states
+
+    # process noise covariance matrix
+    Q = 1*np.diag([
+        q0*T**3/6, # [m] x-position
+        q0*T**3/6, # [m] y-position
+        q1*T**2/2, # [rad/s] yaw angle
+        q0*T**2/2, # [m/s] velocity
+        q1*T, # [rad/s] yaw rate
+        q0*T/10, # [m/s^2] acceleration
+    ])
+
+    # initial error covariance matrix
+    P0 = np.diag([
+        0.1,
+        0.1,
+        0.01,
+        1,
+        0.1,
+        0.2
+    ])
+
+    if not isinstance(records, collections.Iterable):
+        records = [records]
+
+    if record_ids is None:
+        record_ids = range(len(records))
+
+    for i, r in zip(record_ids, records):
+        R = kalman.generate_R(r)
+
+        for j, tr in enumerate(r.trials):
+            event = tr.event
+
+            # create measurement array from event data
+            z = kalman.generate_measurement(event)
+
+            # create initial state estimate
+            x0 = kalman.initial_state_estimate(z)
+            ## replace initial x-position estimate with max from data
+            #x0[0] = event.x.max()
+            # replace trajectory-derived velocity estimate with instructed speed
+            x0[3] = instructed_speed(i, j)
+
+            # check position estimate is reasonable
+            assert x0[0] > 15, 'initial x: {:0.3f}'.format(x0[0])
+            assert x0[1] > 2.0 and x0[1] < 3.5, 'initial y: {:0.3f}'.format(x0[1])
+
+            kf = kalman.Kalman(F, H, Q, R, f, h)
+            result = kf.estimate(x0, P0, z)
+            smoothed_result = kf.smooth_estimate(result)
+
+            event.kalman_result = result
+            event.kalman_smoothed_result = smoothed_result
 
 
 def instructed_speed(record_id, trial_id):

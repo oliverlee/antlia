@@ -141,6 +141,9 @@ class Event(Trial):
             self.steer_slice = None # bicycle time
             #self._identify_steer_slice() # don't run automatically
 
+            self.kalman_result = None
+            self.kalman_smoothed_result = None
+
     def _identify_stationary(self, min_zspan=0.7, zscale=0.0005,
                              hdbscan_kw=None, bbmask=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
