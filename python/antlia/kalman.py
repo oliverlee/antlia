@@ -304,7 +304,7 @@ class Kalman(object):
         P[-1] = P0.copy()
 
         if y_steptol is None:
-            y_steptol = np.zeros(n)
+            y_steptol = np.zeros((l, 1))
         else:
             y_steptol = np.asarray(y_steptol).astype(np.float).reshape((-1, 1))
             assert np.all(y_steptol >= 0.0)
@@ -340,7 +340,7 @@ class Kalman(object):
                 y = z[k].data.reshape((-1, 1)) - H@x_hat_[k]
 
             # skip use of measurement if value is masked or
-            # if value if far from the predicted value
+            # if value is far from the predicted value
             missing_mask = z[k].mask.reshape((-1, 1)) | (np.abs(y) > y_steptol)
             H[missing_mask.squeeze(), :] = 0
 
