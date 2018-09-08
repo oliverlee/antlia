@@ -1201,7 +1201,7 @@ def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
         if 'ylim' in bb:
             bbmask &= ((y < bb['ylim'][1]) &
                        (y > bb['ylim'][0]))
-        if 'zlim' in bounding_box:
+        if 'zlim' in bb:
             bbmask &= ((z < bb['zlim'][1]) &
                        (z > bb['zlim'][0]))
         mask |= bbmask
