@@ -390,7 +390,7 @@ def instructed_eventtype(record_id, trial_id):
     """
     # special case due to error during data collection
     if record_id == 5 and trial_id == 16:
-        return trial2.EventType.Braking
+        return trial2.EventType.Overtaking
 
     return trial2.EventType((((trial_id // 3) % 2) + (record_id % 2)) % 2)
 
@@ -410,6 +410,6 @@ def instructed_record_eventtypes(record_id):
 
     # special case due to error during data collection
     if record_id == 5:
-        types[16] = trial2.EventType.Braking
+        types[16] = trial2.EventType.Overtaking
 
     return types
