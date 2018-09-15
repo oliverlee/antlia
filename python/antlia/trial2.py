@@ -28,7 +28,7 @@ EventDetectionData = namedtuple(
 
 ClusterData = namedtuple(
         'ClusterData',
-        ['label', 'index', 'zmean', 'zspan', 'xspan', 'yspan',
+        ['label', 'index', 'centroid', 'span',
          'count', 'area', 'stationary'])
 
 FakeHdb = namedtuple(
@@ -202,8 +202,9 @@ class Event(Trial):
         cluster_data = []
         stationary_count = 0
 
-        zrange = X[-1, 2] - X[0, 2]
-        zmidpoint = zrange/2
+        zmax = X[-1, 2]
+        zmin = X[0, 2]
+        zrange = zmax - zmin
 
         indexA = X[:, 2] < zrange/4
         indexB = (X[:, 2] >= zrange/4) & (X[:, 2] <= 2*zrange/4)
@@ -213,30 +214,54 @@ class Event(Trial):
 
         area_limit = 0.2
         area = lambda x: x[:, :2].ptp(axis=0).prod()
-        zmean = lambda i: X[i, 2].mean()
-        zspan = lambda i: len(set(X[i, 2]))
+        # x, y is a normalized coordinates
+        zmean = lambda i: X[i, 2].mean()/zrange
+        zspan = lambda i: (np.max(X[i, 2]) - np.min(X[i, 2]))/zrange
+        # x, y are not normalized coordinates
+        xmean = lambda i: X[i, 0].mean()
+        ymean = lambda i: X[i, 1].mean()
         xspan = lambda i: np.max(X[i, 0]) - np.min(X[i, 0])
         yspan = lambda i: np.max(X[i, 1]) - np.min(X[i, 1])
+
+        starts_near_zmin = lambda i: np.min(X[i, 2]) < zmin + 0.1*zrange
+        ends_near_zmax = lambda i: np.max(X[i, 2]) > zmax - 0.1*zrange
+
+        def within_bb(x, y, bb):
+            return (x < bb['xlim'][1] and x > bb['xlim'][0] and
+                    y < bb['ylim'][1] and y > bb['ylim'][0])
 
         extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
             index = hdb.labels_ == label
 
             # (non-noise) clusters with large zspan
-            stationary = (label != -1 and
-                          ((zspan(index) > min_zspan*z.shape[0]) or
-                           ((zspan(index) > 0.3*z.shape[0]) and
-                            (area(X[index]) < 0.001))))
+            stationary = False
+            if label != -1:
+                if zspan(index) > min_zspan:
+                    stationary = True
+                elif zspan(index) > 0.3:
+                    if ((starts_near_zmin(index) or ends_near_zmax(index)) and
+                        xspan(index) < 1):
+                        stationary = True
 
-            if stationary and xspan(index) > 1 and area(X[index]) > area_limit:
-                stationary = False
+            a = area(X[index])
+            xm = xmean(index)
+            ym = ymean(index)
+
+            #if (stationary and
+            #    xspan(index) > 1 and
+            #    a > area_limit and
+            #    not within_bb(xm, ym, OBSTACLE_BB)):
+            #    stationary = False
 
             # If the xy area is large, part of the cyclist trajectory has been
             # grouped into this cluster and we must manually split it.
             # This may require multiple splits and we hardcode a limit of 3
             # iterations.
             split_counter = 0
-            while stationary and area(X[index]) > area_limit:
+            while (stationary and
+                   a > area_limit and
+                   not within_bb(xm, ym, OBSTACLE_BB)):
                 # determine which set has a smaller xy area/bounding box
                 Xj = None
                 min_area = None
@@ -284,10 +309,8 @@ class Event(Trial):
             cluster_data.append(ClusterData(
                 label,
                 index,
-                zmean(index),
-                zspan(index),
-                xspan(index),
-                yspan(index),
+                (xmean(index), ymean(index), zmean(index)),
+                (xspan(index), yspan(index), zspan(index)),
                 np.count_nonzero(index),
                 area(X[index]),
                 stationary))
@@ -303,10 +326,8 @@ class Event(Trial):
             cluster_data.append(ClusterData(
                 max(cluster_labels) + 1,
                 index,
-                zmean(index),
-                zspan(index),
-                xspan(index),
-                yspan(index),
+                (xmean(index), ymean(index), zmean(index)),
+                (xspan(index), yspan(index), zspan(index)),
                 np.count_nonzero(index),
                 area(X[index]),
                 False))

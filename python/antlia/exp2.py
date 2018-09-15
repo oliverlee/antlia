@@ -303,9 +303,9 @@ def _estimate_state(records, record_ids=None):
             # replace trajectory-derived velocity estimate with instructed speed
             x0[3] = instructed_speed(i, j)
 
-            # check position estimate is reasonable
-            assert x0[0] > 15, 'initial x: {:0.3f}'.format(x0[0])
-            assert x0[1] > 2.0 and x0[1] < 3.5, 'initial y: {:0.3f}'.format(x0[1])
+            ## check position estimate is reasonable
+            #assert x0[0] > 15, 'initial x: {:0.3f}'.format(x0[0])
+            #assert x0[1] > 2.0 and x0[1] < 3.5, 'initial y: {:0.3f}'.format(x0[1])
 
             kf = kalman.Kalman(F, H, Q, R, f, h)
             result = kf.estimate(x0, P0, z)
