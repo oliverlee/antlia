@@ -1118,6 +1118,14 @@ class Trial2(Trial):
             count += 1
         event_clumps = np.ma.extras._ezclump(valid_index)
 
+        # if clumps are separated by 3 or fewer indices, combine them
+        for i in reversed(range(1, len(event_clumps))):
+            a = event_clumps[i - 1]
+            b = event_clumps[i]
+            if b.start - a.stop < 3:
+                event_clumps[i - 1] = slice(a.start, b.stop)
+                event_clumps.pop(i)
+
         # filter out events with a minimum size
         MIN_TIME_DURATION = int(5.5/np.diff(self.lidar.time).mean()) # in samples
         event_clumps = [c for c in event_clumps
