@@ -6,6 +6,7 @@ import pickle
 import numpy as np
 
 from antlia import dtype
+from antlia import kalman
 from antlia import record
 from antlia import trial2
 
@@ -101,28 +102,33 @@ assert len(BICYCLE_LOG_FILES) == len(MISSING_SYNC)
 ## 3, 12
 ## 3, 14
 ##
-## time for trial (1, 2) determined from:
-## >> x, y, t = records[1].trials[2].lidar.cartesianz(**trial2.VALID_BB)
-## >> FALL_BBOX = {
-## >>     'xlim': (-5, -2),
-## >>     'ylim': (2.7, 2.8),
-## >> }
-## >> mask = trial2._apply_bbmask(FALL_BBOX, x, y, apply_mask=False)
-## >> t0 = t[mask][0]
-## >> print (t0, t.max() + 1)
-## 291.103905916 325.454327583
+## time for trial (1, 2) determined manually
 
 TRIAL_BBMASK = {
-    #disable 1-2 trial bbmask
-    #(1, 2): {
-    #    'xlim': (-5, -2.5),
-    #    'ylim': (0, 10),
-    #    'zlim': (291.103905916, 325),
-    #},
+    (1, 2): {
+        'xlim': (-5, -2.5),
+        'ylim': (0, 10),
+        'zlim': (291.5, 325),
+    },
+    (1, 10): {
+        'xlim': (-20, 50),
+        'ylim': (0, 10),
+        'zlim': (0, 1100),
+    },
     (2, 4): {
         'xlim': (30, 40),
         'ylim': (0, 4),
     },
+    (2, 13): [
+        {
+            'xlim': (4, 4.4),
+            'ylim': (3.2, 3.3),
+        },
+        {
+            'xlim': (3.85, 4),
+            'ylim': (2.99, 3.07),
+        },
+    ],
     (3, 12): [
         {
             'xlim': (-20, 10),
@@ -140,7 +146,95 @@ TRIAL_BBMASK = {
     (3, 14): {
         'xlim': (10, 40),
         'ylim': (0, 2.6),
-    }
+    },
+    (10, 0): [
+        {
+            'xlim': (-20, 50),
+            'ylim': (0, 5),
+            'zlim': (0, 60)
+        },
+        {
+            'xlim': (4, 7),
+            'ylim': (1, 3),
+        },
+        {
+            'xlim': (3, 5),
+            'ylim': (1, 2.4),
+        },
+        {
+            'xlim': (6, 8),
+            'ylim': (3.25, 3.5),
+        },
+        {
+            'xlim': (4.15, 4.25),
+            'ylim': (3.25, 3.35),
+        },
+        {
+            'xlim': (0, 10),
+            'ylim': (3, 4),
+            'zlim': (97, 120),
+        }
+    ],
+    (10, 1): {
+        'xlim': (5.2, 6.2),
+        'ylim': (2.5, 3.0),
+    },
+    (10, 2): [
+        {
+            'xlim': (-20, -10),
+            'ylim': (0, 5),
+        },
+        {
+            'xlim': (3, 5),
+            'ylim': (1.3, 2.5),
+        }
+    ],
+    (10, 3): [
+        {
+            'xlim': (5.65, 5.85),
+            'ylim': (2.76, 2.88),
+        },
+        {
+            'xlim': (5.25, 5.60),
+            'ylim': (2.55, 2.75),
+        }
+    ],
+    (10, 4): [
+        {
+            'xlim': (3.3, 5.3),
+            'ylim': (1.6, 2.5),
+        },
+        {
+            'xlim': (5, 6),
+            'ylim': (2.5, 2.9),
+        }
+    ],
+    (14, 1): [
+        {
+            'xlim': (-20, -10),
+            'ylim': (0, 5),
+        },
+        {
+            'xlim': (0, 60),
+            'ylim': (0, 5),
+            'zlim': (100, 165),
+        },
+        {
+            'xlim': (-10, 10),
+            'ylim': (0, 2),
+            'zlim': (165, 175),
+        }
+    ],
+    (16, 2): [
+        {
+            'xlim': (4.1, 4.3),
+            'ylim': (3.25, 3.33),
+        },
+        {
+            'xlim': (-10, -5),
+            'ylim': (0, 5),
+        },
+    ],
 }
 
 
@@ -217,6 +311,69 @@ def load_records(index=None, data_dir=None, verbose=False):
     return exp_records
 
 
+def _estimate_state(records, record_ids=None):
+    # generate Kalman matrices
+    f, h, F, H = kalman.generate_fhFH(constant_velocity=True,
+                                      wheelbase=0.6) #TODO verify
+
+    T = 1/125 # bicycle sample rate
+    q0 = 1 # weight factor for translation-related states
+    q1 = 0.01 # weight factor for rotation-related states
+
+    # process noise covariance matrix
+    Q = 1*np.diag([
+        q0*T**3/6, # [m] x-position
+        q0*T**3/6, # [m] y-position
+        q1*T**2/2, # [rad/s] yaw angle
+        q0*T**2/2, # [m/s] velocity
+        q1*T, # [rad/s] yaw rate
+        q0*T/10, # [m/s^2] acceleration
+    ])
+
+    # initial error covariance matrix
+    P0 = np.diag([
+        0.1,
+        0.1,
+        0.01,
+        1,
+        0.1,
+        0.2
+    ])
+
+    if not isinstance(records, collections.Iterable):
+        records = [records]
+
+    if record_ids is None:
+        record_ids = range(len(records))
+
+    for i, r in zip(record_ids, records):
+        R = kalman.generate_R(r)
+
+        for j, tr in enumerate(r.trials):
+            event = tr.event
+
+            # create measurement array from event data
+            z = kalman.generate_measurement(event)
+
+            # create initial state estimate
+            x0 = kalman.initial_state_estimate(z)
+            ## replace initial x-position estimate with max from data
+            #x0[0] = event.x.max()
+            # replace trajectory-derived velocity estimate with instructed speed
+            x0[3] = instructed_speed(i, j)
+
+            ## check position estimate is reasonable
+            #assert x0[0] > 15, 'initial x: {:0.3f}'.format(x0[0])
+            #assert x0[1] > 2.0 and x0[1] < 3.5, 'initial y: {:0.3f}'.format(x0[1])
+
+            kf = kalman.Kalman(F, H, Q, R, f, h)
+            result = kf.estimate(x0, P0, z)
+            smoothed_result = kf.smooth_estimate(result)
+
+            event.kalman_result = result
+            event.kalman_smoothed_result = smoothed_result
+
+
 def instructed_speed(record_id, trial_id):
     """Return instructed speed for experiment trial.
     """
@@ -233,7 +390,7 @@ def instructed_eventtype(record_id, trial_id):
     """
     # special case due to error during data collection
     if record_id == 5 and trial_id == 16:
-        return trial2.EventType.Braking
+        return trial2.EventType.Overtaking
 
     return trial2.EventType((((trial_id // 3) % 2) + (record_id % 2)) % 2)
 
@@ -253,6 +410,6 @@ def instructed_record_eventtypes(record_id):
 
     # special case due to error during data collection
     if record_id == 5:
-        types[16] = trial2.EventType.Braking
+        types[16] = trial2.EventType.Overtaking
 
     return types

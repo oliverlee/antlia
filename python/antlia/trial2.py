@@ -28,7 +28,8 @@ EventDetectionData = namedtuple(
 
 ClusterData = namedtuple(
         'ClusterData',
-        ['label', 'index', 'zmean', 'zspan', 'count', 'area', 'stationary'])
+        ['label', 'index', 'centroid', 'span',
+         'count', 'area', 'stationary'])
 
 FakeHdb = namedtuple(
         'FakeHdb',
@@ -141,6 +142,9 @@ class Event(Trial):
             self.steer_slice = None # bicycle time
             #self._identify_steer_slice() # don't run automatically
 
+            self.kalman_result = None
+            self.kalman_smoothed_result = None
+
     def _identify_stationary(self, min_zspan=0.7, zscale=0.0005,
                              hdbscan_kw=None, bbmask=None):
         x, y, z = self.lidar.cartesianz(**VALID_BB)
@@ -185,7 +189,7 @@ class Event(Trial):
         cluster_labels = list(set(hdb.labels_))
 
         # change parameters to get fewer clusters
-        if len(cluster_labels) > 100:
+        if len(cluster_labels) > 80:
             hdbscan_kw['min_cluster_size'] = 60
             hdbscan_kw['min_samples'] = 40
             hdb = hdbscan.HDBSCAN(**hdbscan_kw).fit(X)
@@ -198,8 +202,9 @@ class Event(Trial):
         cluster_data = []
         stationary_count = 0
 
-        zrange = X[-1, 2] - X[0, 2]
-        zmidpoint = zrange/2
+        zmax = X[-1, 2]
+        zmin = X[0, 2]
+        zrange = zmax - zmin
 
         indexA = X[:, 2] < zrange/4
         indexB = (X[:, 2] >= zrange/4) & (X[:, 2] <= 2*zrange/4)
@@ -209,22 +214,54 @@ class Event(Trial):
 
         area_limit = 0.2
         area = lambda x: x[:, :2].ptp(axis=0).prod()
-        zmean = lambda i: X[i, 2].mean()
-        zspan = lambda i: len(set(X[i, 2]))
+        # x, y is a normalized coordinates
+        zmean = lambda i: X[i, 2].mean()/zrange
+        zspan = lambda i: (np.max(X[i, 2]) - np.min(X[i, 2]))/zrange
+        # x, y are not normalized coordinates
+        xmean = lambda i: X[i, 0].mean()
+        ymean = lambda i: X[i, 1].mean()
+        xspan = lambda i: np.max(X[i, 0]) - np.min(X[i, 0])
+        yspan = lambda i: np.max(X[i, 1]) - np.min(X[i, 1])
+
+        starts_near_zmin = lambda i: np.min(X[i, 2]) < zmin + 0.1*zrange
+        ends_near_zmax = lambda i: np.max(X[i, 2]) > zmax - 0.1*zrange
+
+        def within_bb(x, y, bb):
+            return (x < bb['xlim'][1] and x > bb['xlim'][0] and
+                    y < bb['ylim'][1] and y > bb['ylim'][0])
 
         extra_cluster_index = np.zeros(hdb.labels_.shape, dtype=bool)
         for label in cluster_labels:
             index = hdb.labels_ == label
 
             # (non-noise) clusters with large zspan
-            stationary = (label != -1 and
-                          (zspan(index) > min_zspan*z.shape[0] or
-                           (zspan(index) > 0.3*z.shape[0] and
-                            area(X[index]) < area_limit)))
+            stationary = False
+            if label != -1:
+                if zspan(index) > min_zspan:
+                    stationary = True
+                elif zspan(index) > 0.3:
+                    if ((starts_near_zmin(index) or ends_near_zmax(index)) and
+                        xspan(index) < 1):
+                        stationary = True
 
-            # if the xy area is large, part of the cyclist trajectory has been
-            # grouped into this cluster and we must manually split it
-            if stationary and area(X[index]) > area_limit:
+            a = area(X[index])
+            xm = xmean(index)
+            ym = ymean(index)
+
+            #if (stationary and
+            #    xspan(index) > 1 and
+            #    a > area_limit and
+            #    not within_bb(xm, ym, OBSTACLE_BB)):
+            #    stationary = False
+
+            # If the xy area is large, part of the cyclist trajectory has been
+            # grouped into this cluster and we must manually split it.
+            # This may require multiple splits and we hardcode a limit of 3
+            # iterations.
+            split_counter = 0
+            while (stationary and
+                   a > area_limit and
+                   not within_bb(xm, ym, OBSTACLE_BB)):
                 # determine which set has a smaller xy area/bounding box
                 Xj = None
                 min_area = None
@@ -244,6 +281,14 @@ class Event(Trial):
                 xmin, ymin, _ = Xj.min(axis=0)
                 xmax, ymax, _ = Xj.max(axis=0)
 
+                # increase bounding box by 10% in x/y directions
+                dx = xmax - xmin
+                dy = ymax - ymin
+                xmin -= 0.05*dx
+                xmax += 0.05*dx
+                ymin -= 0.05*dy
+                ymax += 0.05*dy
+
                 # track indices with a masked array
                 Y = np.ma.masked_array(X)
                 Y[~index] = np.ma.masked
@@ -257,11 +302,15 @@ class Event(Trial):
                 Y[within] = np.ma.masked
                 extra_cluster_index |= ~Y.mask[:, 0]
 
+                split_counter += 1
+                if split_counter >= 3:
+                    break
+
             cluster_data.append(ClusterData(
                 label,
                 index,
-                zmean(index),
-                zspan(index),
+                (xmean(index), ymean(index), zmean(index)),
+                (xspan(index), yspan(index), zspan(index)),
                 np.count_nonzero(index),
                 area(X[index]),
                 stationary))
@@ -277,8 +326,8 @@ class Event(Trial):
             cluster_data.append(ClusterData(
                 max(cluster_labels) + 1,
                 index,
-                zmean(index),
-                zspan(index),
+                (xmean(index), ymean(index), zmean(index)),
+                (xspan(index), yspan(index), zspan(index)),
                 np.count_nonzero(index),
                 area(X[index]),
                 False))
@@ -748,7 +797,6 @@ class Event(Trial):
         x.mask = self.stationary_mask | self.bb_mask
         y.mask = self.stationary_mask | self.bb_mask
 
-
         # determine stationary noise bounding boxes
         stationary_bboxes = []
         for cluster in self.clusters:
@@ -1070,6 +1118,14 @@ class Trial2(Trial):
             count += 1
         event_clumps = np.ma.extras._ezclump(valid_index)
 
+        # if clumps are separated by 3 or fewer indices, combine them
+        for i in reversed(range(1, len(event_clumps))):
+            a = event_clumps[i - 1]
+            b = event_clumps[i]
+            if b.start - a.stop < 3:
+                event_clumps[i - 1] = slice(a.start, b.stop)
+                event_clumps.pop(i)
+
         # filter out events with a minimum size
         MIN_TIME_DURATION = int(5.5/np.diff(self.lidar.time).mean()) # in samples
         event_clumps = [c for c in event_clumps
@@ -1201,7 +1257,7 @@ def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
         if 'ylim' in bb:
             bbmask &= ((y < bb['ylim'][1]) &
                        (y > bb['ylim'][0]))
-        if 'zlim' in bounding_box:
+        if 'zlim' in bb:
             bbmask &= ((z < bb['zlim'][1]) &
                        (z > bb['zlim'][0]))
         mask |= bbmask
