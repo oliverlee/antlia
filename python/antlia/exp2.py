@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+import collections
 import os
 import pickle
 import numpy as np
@@ -78,7 +79,7 @@ TRIAL_MASK = [
    0,
    None,
    None,
-   9,
+   [9, 10],
    None,
    None,
    11,
@@ -112,11 +113,12 @@ assert len(BICYCLE_LOG_FILES) == len(MISSING_SYNC)
 ## 291.103905916 325.454327583
 
 TRIAL_BBMASK = {
-    (1, 2): {
-        'xlim': (-5, -2.5),
-        'ylim': (0, 10),
-        'zlim': (291.103905916, 325),
-    },
+    #disable 1-2 trial bbmask
+    #(1, 2): {
+    #    'xlim': (-5, -2.5),
+    #    'ylim': (0, 10),
+    #    'zlim': (291.103905916, 325),
+    #},
     (2, 4): {
         'xlim': (30, 40),
         'ylim': (0, 4),
@@ -142,7 +144,7 @@ TRIAL_BBMASK = {
 }
 
 
-def load_records(index=None, data_dir=None):
+def load_records(index=None, data_dir=None, verbose=False):
     """Load the experiment records from Gothenburg April 2018. Notes on missing
     synchronizations and repeated trials are applied.
 
@@ -153,6 +155,7 @@ def load_records(index=None, data_dir=None):
     data_dir: Specifies path to data directory containing bicycle and lidar log
               files. The lidar log files must be pre-processed as this function
               does not handle bag files.
+    verbose: bool, print status messages while loading records
     """
     if data_dir is None:
         data_dir = os.path.join(os.path.dirname(__file__),
@@ -168,6 +171,9 @@ def load_records(index=None, data_dir=None):
     if index is not None:
         exp_index = exp_index[index]
 
+    if not isinstance(exp_index, collections.Iterable):
+        exp_index = [exp_index]
+
     # determine which trials have specific bounding boxes
     trial_bbkeys = {}
     for i, j in TRIAL_BBMASK.keys():
@@ -177,6 +183,9 @@ def load_records(index=None, data_dir=None):
             trial_bbkeys[i] = l
 
     for i in exp_index:
+        if verbose:
+            print('creating record from {} and {}'.format(
+                LIDAR_LOG_FILES[i], BICYCLE_LOG_FILES[i]))
         # create record from lidar and bicycle logs
         r = record.Record(
             dtype.load_converted_record(
@@ -187,7 +196,8 @@ def load_records(index=None, data_dir=None):
 
         # synchronize records and detect trials
         r.sync()
-        r._calculate_trials2(missing_sync=MISSING_SYNC[i],
+        r._calculate_trials2(instructed_record_eventtypes(i),
+                             missing_sync=MISSING_SYNC[i],
                              trial_mask=TRIAL_MASK[i])
 
         # recalculate event detection if required
@@ -195,10 +205,14 @@ def load_records(index=None, data_dir=None):
             for key in trial_bbkeys[i]:
                 rider_id, trial_id = key
                 assert i == rider_id
-                r.trials[trial_id]._detect_event(TRIAL_BBMASK[key])
+                r.trials[trial_id]._detect_event(instructed_eventtype(*key),
+                                                 TRIAL_BBMASK[key])
 
         # append processed record
         exp_records.append(r)
+        if verbose:
+            print('created record from {} and {}'.format(
+                LIDAR_LOG_FILES[i], BICYCLE_LOG_FILES[i]))
 
     return exp_records
 
@@ -213,3 +227,32 @@ def instructed_speed(record_id, trial_id):
                         22, 12, 17,
                         22, 17, 12].astype(np.float) / 3.6
     return np.roll(speed_order, -3*record_id)[trial_id]
+
+def instructed_eventtype(record_id, trial_id):
+    """Return instructed event type for experiment trial.
+    """
+    # special case due to error during data collection
+    if record_id == 5 and trial_id == 16:
+        return trial2.EventType.Braking
+
+    return trial2.EventType((((trial_id // 3) % 2) + (record_id % 2)) % 2)
+
+def instructed_record_eventtypes(record_id):
+    """Return array of instructed event types for experiment record.
+    """
+    types = [0, 0, 0,
+             1, 1, 1,
+             0, 0, 0,
+             1, 1, 1,
+             0, 0, 0,
+             1, 1, 1]
+    types = np.array([trial2.EventType(t) for t in types])
+
+    if (record_id % 2) == 1:
+        types = np.roll(types, 3)
+
+    # special case due to error during data collection
+    if record_id == 5:
+        types[16] = trial2.EventType.Braking
+
+    return types

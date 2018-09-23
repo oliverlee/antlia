@@ -22,7 +22,9 @@ import antlia.plot_braking as braking
 
 EventDetectionData = namedtuple(
         'EventDetectionData',
-        ['mask_a', 'mask_b', 'mask_event', 'entry_time', 'exit_time'])
+        ['valid_clumps', 'entry_clumps',
+         'exit_brake_clumps', 'exit_steer_clumps',
+         'event_slice', 'entry_time', 'exit_time'])
 
 ClusterData = namedtuple(
         'ClusterData',
@@ -63,11 +65,15 @@ BrakeEventLinearFitParameters = namedtuple(
          'linregress_stderr'])
 
 ENTRY_BB = {
-    'xlim': (20, 30),
+    'xlim': (18, 25),
     'ylim': (2.5, 3.5)
 }
-EXIT_BB = {
-    'xlim': (-20, -10),
+EXIT_BB_BRAKE = {
+    'xlim': (-5, 0),
+    'ylim': (0.5, 1.5)
+}
+EXIT_BB_STEER = {
+    'xlim': (-20, -15),
     'ylim': (2.5, 3.5)
 }
 OBSTACLE_BB = {
@@ -1017,144 +1023,166 @@ class Event(Trial):
 
 class Trial2(Trial):
     def __init__(self, record, bicycle_data, lidar_data, period,
-                 bbmask=None):
+                 event_type, bbmask=None):
             super().__init__(bicycle_data, period)
             self.record = record
             self.bicycle = self.data
             self.lidar = lidar_data
 
-            self.event_indices = None
             self.event_detection = None
             self.event = None
-            self._detect_event(bbmask=bbmask)
+            self._detect_event(event_type, bbmask=bbmask)
 
     @staticmethod
-    def frame_mask_a(bicycle_data):
-        return bicycle_data.speed > 0.5
-
-    @staticmethod
-    def frame_mask_b(lidar_data, bbmask=None):
+    def detect_valid_index(lidar_data, bbmask=None, count=None):
         x, y, z = lidar_data.cartesianz(**VALID_BB)
 
         _apply_bbmask(OBSTACLE_BB, x, y, z)
         if bbmask is not None:
             _apply_bbmask(bbmask, x, y, z)
 
-        return x.count(axis=1) > 1
+        if count is None:
+            count = 1
+        return x.count(axis=1) > count
 
-    @staticmethod
-    def event_indices(mask):
-        edges = np.diff(mask.astype(int))
-        rising = np.where(edges > 0)[0]
-        falling = np.where(edges < 0)[0]
-
-        assert len(rising) == len(falling)
-        return list(zip(rising, falling))
-
-    def _detect_event(self, bbmask=None):
-        """Event is detected using two masks, one on the bicycle speed sensor
-        and one on the lidar data. Mask A detects when the bicycle speed is
-        greater than 0.5. Mask B detects if any object is visible to the lidar,
-        within the bounding box specified by (-20, 1.0) and (60, 3.5) with
-        respect to the lidar reference frame. The obstacle is ignored with the
-        use of a negative bounding box.
-
-        This region is then further reduced by detecting the cyclist appearing
-        in the bounding box (20, 2), (50, 3.5) and (possibly, in the case of
-        overtaking) and in the bounding box (-20, 2), (-10, 3.5).
+    def _detect_event(self, event_type, bbmask=None):
+        """The event is detected using the following masks: VALID_BB, ENTRY_BB,
+        EXIT_BB_BRAKE, and EXIT_BB_STEER. Candidates for the event are first
+        determined detecting the cyclist withing VALID_BB. The candidates are
+        searched for ENTRY_BB and EXIT_BB_BRAKE, EXIT_BB_STEER to determine the
+        most likely event. Use of EXIT_BB_STEER or EXIT_BB_BRAKE is determined
+        by the event_type argument.
 
         Parameters:
         bbmask: dict or iteratble of dicts, keywords supplied to
                 lidar.cartesian() for an area to ignore for event detection.
                 This is used in the event of erroneous lidar data.
         """
-        mask_a = Trial2.frame_mask_a(self.bicycle)
-        mask_b = Trial2.frame_mask_b(self.lidar, bbmask)
+        # determine event indices from lidar data
+        # increase the count threshold if all indices are valid
+        count = 1
+        while True:
+            valid_index = Trial2.detect_valid_index(self.lidar, bbmask, count)
 
-        # interpolate mask_b from lidar time to bicycle time
-        mask_b = np.interp(self.bicycle.time, self.lidar.time, mask_b)
-
-        mask_ab = util.debounce(np.logical_and(mask_a, mask_b))
-        evti = Trial2.event_indices(mask_ab)
-
-        # filter out events with a minimum size and minimum average speed
-        MIN_TIME_DURATION = int(5.5 * 125) # in samples
-        MIN_AVG_SPEED = 2 # in m/s
-        evti = [e for e in evti
-                if ((e[1] - e[0] > MIN_TIME_DURATION) and
-                    (np.mean(self.bicycle.speed[e[0]:e[1]]) > MIN_AVG_SPEED))]
-
-        assert len(evti) > 0, "unable to detect event for this trial"
-        evt_index = evti[-1]
-
-        # reduce region using entry and exit bounding box detection
-        entry_mask = self.lidar.cartesian(**ENTRY_BB)[0].count(axis=1) > 1
-        exit_mask = self.lidar.cartesian(**EXIT_BB)[0].count(axis=1) > 1
-
-        # find time where cyclist enters lidar vision
-        entry_time = None
-        for x in np.where(entry_mask > 0)[0]:
-            t = self.lidar.time[x]
-            if (t >= self.bicycle.time[evt_index[0]] and
-                t < self.bicycle.time[evt_index[1]]):
-                entry_time = t
-                try:
-                    i = np.where(self.bicycle.time >= t)[0][0]
-                except IndexError:
-                    # error going from lidar time to bicycle time
-                    msg = 'Unable to detect cyclist entry for trial. '
-                    msg += 'Event detection failure.'
-                    raise IndexError(msg)
-                evt_index = (i, evt_index[1])
+            # require at least 20% of indices to be non-valid
+            if np.sum(valid_index)/valid_index.size < 0.8:
                 break
+            count += 1
+        event_clumps = np.ma.extras._ezclump(valid_index)
+
+        # filter out events with a minimum size
+        MIN_TIME_DURATION = int(5.5/np.diff(self.lidar.time).mean()) # in samples
+        event_clumps = [c for c in event_clumps
+                        if c.stop - c.start > MIN_TIME_DURATION]
+        # filter out events that end in the first third of the trial
+        event_clumps = [c for c in event_clumps
+                        if c.stop > 0.3*valid_index.size]
+
+        msg = "unable to detect event for this trial (count = {})".format(count)
+        assert len(event_clumps) > 0, msg
+
+        # reduce span of event using entry and exit bounding box detection
+        def bbox_clumps(bbox, slice_):
+            index = self.lidar.cartesian(**bbox)[0].count(axis=1) > 1
+
+            mask = np.zeros(index.shape, dtype=bool)
+            mask[slice_.start:slice_.stop] = True
+
+            index &= mask
+            return np.ma.extras._ezclump(index)
+
+        def first_clump_in_slice(clumps, slice_, clump_edge=None):
+            """Check if clump is contained withing slice. If clump_edge is not
+            None, check only if the specified edge is contained.
+            """
+            for c in clumps:
+                if clump_edge is None:
+                    if c.start > slice_.start and c.stop < slice_.stop:
+                        return c
+                else:
+                    e = getattr(c, clump_edge)
+                    if e > slice_.start and e < slice_.stop:
+                        return c
+            return None
+
+        # use last clump for the event
+        # search backwards in event clumps for entry/exit conditions
+        for event_index in event_clumps[::-1]:
+
+            # find time where cyclist enters lidar vision
+            # use falling edge of first entry clump within the event slice
+            entry_clumps = bbox_clumps(ENTRY_BB, event_index)
+            c = first_clump_in_slice(entry_clumps, event_index, 'stop')
+            entry_time = None
+            if c is not None:
+                event_index = slice(c.stop, event_index.stop)
+                entry_time = self.lidar.time[c.stop]
+
+            # find time where cyclist has finished overtaking obstacle, if it
+            # exists using the rising edge of the first clump within the event
+            # slice
+            if event_type == EventType.Overtaking:
+                exit_clumps = bbox_clumps(EXIT_BB_STEER, event_index)
+            elif event_type == EventType.Braking:
+                exit_clumps = bbox_clumps(EXIT_BB_BRAKE, event_index)
+            else:
+                raise ValueError(event_type)
+
+            c = first_clump_in_slice(exit_clumps, event_index, 'start')
+            exit_time = None
+            if c is not None:
+                event_index = slice(event_index.start, c.start)
+                exit_time = self.lidar.time[c.start]
+
+            if entry_time is not None and exit_time is not None:
+                # event found, otherwise check next event clump
+                break
+
         if entry_time is None:
+            entry_time = self.lidar.time[event_index.start]
             msg = 'Unable to detect cyclist entry for event starting at '
-            msg += 't = {0:.3f} seconds'.format(self.bicycle.time[evt_index[0]])
+            msg += 't = {0:.3f} seconds'.format(
+                    self.lidar.time[event_index.start])
             warnings.warn(msg, UserWarning)
 
-        # find time where cyclist has finished overtaking obstacle, if it exists
-        # using the falling edge of the first clump
-        exit_time = None
-        exit_clumps = np.ma.extras._ezclump(exit_mask > 0)
-        for clump in exit_clumps:
-            t = self.lidar.time[clump.stop - 1] # make exit time inclusive
-            if (t >= self.bicycle.time[evt_index[0]] and
-                t < self.bicycle.time[evt_index[1]]):
-                exit_time = t
-                try:
-                    i = np.where(self.bicycle.time > t)[0][0]
-                except IndexError:
-                    # error going from lidar time to bicycle time
-                    msg = 'Unable to detect cyclist exit for trial. '
-                    msg += 'Event detection failure.'
-                    raise IndexError(msg)
-                evt_index = (evt_index[0], i - 1)
-                break
-
-        d = (evt_index[1] - evt_index[0])//8
-        v0 = np.mean(self.bicycle.speed[evt_index[0]:evt_index[0] + d])
-        v1 = np.mean(self.bicycle.speed[evt_index[1] - d:evt_index[1]])
-        if exit_time is None and v1/v0 > 0.8:
-            msg = 'Unable to detect cyclist exiting or braking for event '
-            msg += 'ending at t = '
-            msg += '{0:.3f} seconds'.format(self.bicycle.time[evt_index[1]])
-            warnings.warn(msg, UserWarning)
-
-        # classify event type
-        event_type = EventType.Overtaking
         if exit_time is None:
-            event_type = EventType.Braking
+            exit_time = self.lidar.time[event_index.stop - 1]
+            msg = 'Unable to detect cyclist exit or braking for event '
+            msg += 'ending at t = '
+            msg += '{0:.3f} seconds'.format(
+                    self.lidar.time[event_index.stop - 1])
+            warnings.warn(msg, UserWarning)
 
-        self.event_indices = evt_index
+        if event_type == EventType.Overtaking:
+            exit_brake_clumps = []
+            exit_steer_clumps = exit_clumps
+        else:
+            exit_brake_clumps = exit_clumps
+            exit_steer_clumps = []
+
         self.event_detection = EventDetectionData(
-                mask_a, mask_b, evti[-1], entry_time, exit_time)
+            valid_clumps=event_clumps,
+            entry_clumps=entry_clumps,
+            exit_brake_clumps=exit_brake_clumps,
+            exit_steer_clumps=exit_steer_clumps,
+            event_slice=event_index,
+            entry_time=entry_time,
+            exit_time=exit_time)
 
-        t0 = self.bicycle.time[evt_index[0]]
-        t1 = self.bicycle.time[evt_index[1]] + 0.05 # add one extra lidar frame
+        # get indices for bicycle time
+        i0 = np.where(self.bicycle.time > entry_time)[0][0]
+        if i0 != 0:
+            i0 -= 1
+
+        try:
+            i1 = np.where(self.bicycle.time > exit_time)[0][0]
+        except IndexError:
+            i1 = -1
+
         self.event = Event(
                 self,
-                self.bicycle[evt_index[0]:evt_index[1]],
-                self.lidar.frame(lambda t: (t >= t0) & (t < t1)),
+                self.bicycle[i0:i1],
+                self.lidar[event_index],
                 self.period,
                 event_type,
                 bbmask=bbmask)
