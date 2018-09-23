@@ -467,7 +467,22 @@ class Event(Trial):
         """
         assert timestamp >= self.bicycle.time[0]
         assert timestamp <= self.bicycle.time[-1]
-        assert timestamp >= self.lidar.time[0]
+
+        try:
+            assert timestamp >= self.lidar.time[0]
+        except AssertionError:
+            # Timestamp occurs before the start of lidar data, likely within the
+            # first few samples of bicycle data for this event. Lidar frames
+            # have a sampling rate of 20 Hz and the largest error we can
+            # introduce by shifting the dtc timestamp is 50 ms.
+            msg = 'Distance-to-collision timestamp occurs before the '
+            msg += 'start of lidar data.\n'
+            msg += 'Timestamp: {}\n'.format(timestamp)
+            msg += 'Start time of lidar data: {}\n'.format(self.lidar.time[0])
+            msg += 'Adjusting dtc timestamp to start time of lidar data.\n'
+            warnings.warn(msg, UserWarning)
+            return self._calculate_dtc(0)[0]
+
         assert timestamp <= self.lidar.time[-1]
 
         i = self.lidar.frame_index(timestamp)
