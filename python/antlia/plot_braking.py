@@ -70,15 +70,21 @@ def get_trial_braking_indices(accel, threshold=0.3, min_size=15):
     return largest_clump, merged_clumps
 
 
-def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15):
+def get_metrics(trial, window_size=55, braking_threshold=0.3, min_size=15,
+                use_kalman=False):
     """ window size in samples
         ws = 55 # window size of samples -> 0.44 seconds @ 125 Hz
+        use_kalman: bool, use smoothed kalman filter speed estimate
     """
-    t = trial['time']
-    v = trial['speed']
-    filtered_velocity = ff.moving_average(v,
-                                          window_size, window_size/2)
-    filtered_acceleration = ff.moving_average(trial['accelerometer x'],
+    t = trial.data['time']
+    if use_kalman:
+        v = np.squeeze(trial.kalman_smoothed_result.state_estimate[:, 3])
+        filtered_velocity = v
+    else:
+        v = trial.data['speed']
+        filtered_velocity = ff.moving_average(v,
+                                              window_size, window_size/2)
+    filtered_acceleration = ff.moving_average(trial.data['accelerometer x'],
                                               window_size, window_size/2)
     braking_range = get_trial_braking_indices(filtered_acceleration,
                                               braking_threshold,
@@ -180,7 +186,8 @@ def plot_rider_velocities(recs, rider_id, **kwargs):
     return fig, axes
 
 
-def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
+def plot_trial_braking_event(trial, ax=None, metrics_kw=None, use_kalman=False,
+                             **kwargs):
     if ax is None:
         fig, ax = plt.subplots(**kwargs)
     else:
@@ -198,7 +205,7 @@ def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
         # skip empty input file
         return fig, ax
 
-    t = trial['time']
+    t = trial.data['time']
     l0, l1 = metrics['braking range'][0]
     # fit to 10 second window
     tw = 10
@@ -212,14 +219,6 @@ def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
             label='velocity, gaussian weighted moving average')
     ax.plot(t[i0:i1], af[i0:i1], color=ac,
             label='acceleration, gaussian weighted moving average')
-    ax.legend()
-    ylim = ax.get_ylim()
-
-    # plot unfiltered signals
-    ax.plot(t[i0:i1], trial['speed'][i0:i1], color=vc, alpha=0.3)
-    ax.plot(t[i0:i1], trial['accelerometer x'][i0:i1], color=ac, alpha=0.3)
-    ax.axhline(0, color='black', linewidth=1,zorder=1)
-    ax.set_ylim(ylim) # use ylim based on filtered data
 
     # plot braking section
     ax.axvspan(t[l0], t[l1], color=colors[5], alpha=0.3)
@@ -232,10 +231,37 @@ def plot_trial_braking_event(trial, ax=None, metrics_kw=None, **kwargs):
 
     # plot best fit line
     p = [metrics['linregress slope'], metrics['linregress intercept']]
-    ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]), color=colors[7])
+    ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]),
+            linewidth=2,
+            color=vc, linestyle='--')
+
+    # plot kalman smoothed result
+    if use_kalman:
+        vc2 = colors[9]
+        metrics2, vf2, _, _ = get_metrics(trial,
+                                          use_kalman=True,
+                                          **metrics_kw)
+        l0, l1 = metrics2['braking range'][0]
+        p = [metrics2['linregress slope'], metrics2['linregress intercept']]
+
+        # plot kalman smoothed speed estimate
+        ax.plot(t[i0:i1], vf2[i0:i1], color=vc2,
+                label='velocity, smoothed kalman filter estimate')
+        # plot kalman best fit line
+        ax.plot(t[l0:l1], np.polyval(p, t[l0:l1]),
+                linewidth=2,
+                color=vc2, linestyle='--')
+        #ax.relim()
+    ax.autoscale(enable=False)
+
+    # plot unfiltered signals
+    ax.plot(t[i0:i1], trial.data['speed'][i0:i1], color=vc, alpha=0.3)
+    ax.plot(t[i0:i1], trial.data['accelerometer x'][i0:i1], color=ac, alpha=0.3)
+    ax.axhline(0, color='black', linewidth=1,zorder=1)
 
     ax.set_ylabel('m/s, -m/s^2')
     ax.set_xlabel('time [s]')
+    ax.legend()
     return fig, ax
 
 
