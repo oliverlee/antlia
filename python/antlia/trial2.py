@@ -359,7 +359,6 @@ class Event(Trial):
             raise TypeError('X.shape must be (n, 2)')
 
         X.mask = np.ma.nomask
-        #centroid = X.mean(axis=0)
         centroid = np.median(X.data, axis=0)
         distances = scipy.spatial.distance.cdist(X, centroid.reshape((1, 2)))
         index = np.matlib.repmat(
@@ -425,9 +424,21 @@ class Event(Trial):
         """
         # bicycle
         X = self._compressed_points(lidar_index, False)
+        size_x = X.count()
 
         # stationary
         Y = self._compressed_points(lidar_index, True)
+        size_y = Y.count()
+
+        # if the difference in sets is greater than 20% of the sum of both sets,
+        # probably some errors with clustering
+        if abs(size_x - size_y) > 0.2*(size_x + size_y):
+            msg = 'Difference in size of bicycle and obstacle cluster '
+            msg += 'exceeds 20% of the total set size.\n'
+            msg += 'Clustering recomputed with k-means.'
+            warnings.warn(msg, UserWarning)
+
+            X, Y = dtc.cluster(*np.concatenate((X, Y)).T)
 
         # exclude bicycle noise
         self._set_radius_mask(X)
