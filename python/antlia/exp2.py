@@ -252,6 +252,9 @@ TRIAL_BBMASK = {
     ],
 }
 
+# Metrics for calculating experiment braking event
+METRICS_KW = {'braking_threshold': 0.3, 'min_size': 75}
+
 
 def load_records(index=None, data_dir=None, verbose=False):
     """Load the experiment records from Gothenburg April 2018. Notes on missing
