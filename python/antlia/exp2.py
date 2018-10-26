@@ -96,14 +96,8 @@ assert len(BICYCLE_LOG_FILES) == len(LIDAR_LOG_FILES) - 1
 assert len(MISSING_SYNC) == len(TRIAL_MASK)
 assert len(BICYCLE_LOG_FILES) == len(MISSING_SYNC)
 
-## trial specific bounding box masks for the following trials:
-## 1, 2
-## 2, 4
-## 3, 12
-## 3, 14
-##
+## trial specific bounding box masks:w
 ## time for trial (1, 2) determined manually
-
 TRIAL_BBMASK = {
     (1, 2): {
         'xlim': (-5, -2.5),
@@ -143,10 +137,16 @@ TRIAL_BBMASK = {
             'ylim': (0, 2.1),
         }
     ],
-    (3, 14): {
-        'xlim': (10, 40),
-        'ylim': (0, 2.6),
-    },
+    (3, 14): [
+        {
+            'xlim': (3, 5),
+            'ylim': (3, 4),
+        },
+        {
+            'xlim': (10, 40),
+            'ylim': (0, 2.6),
+        }
+    ],
     (10, 0): [
         {
             'xlim': (-20, 50),
@@ -329,7 +329,7 @@ def load_records(index=None, data_dir=None, verbose=False):
     return exp_records
 
 
-def _estimate_state(records, record_ids=None):
+def _estimate_state(records, record_ids=None, trial_index=None):
     # generate Kalman matrices
     f, h, F, H = kalman.generate_fhFH(constant_velocity=True,
                                       wheelbase=0.6) #TODO verify
@@ -367,7 +367,13 @@ def _estimate_state(records, record_ids=None):
     for i, r in zip(record_ids, records):
         R = kalman.generate_R(r)
 
-        for j, tr in enumerate(r.trials):
+        if trial_index is None:
+            trial_iterator = enumerate(r.trials)
+        else:
+            trial_iterator = zip(trial_index,
+                                 map(lambda i: r.trials[i], trial_index))
+
+        for j, tr in trial_iterator:
             event = tr.event
 
             # create measurement array from event data
