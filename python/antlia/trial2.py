@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from enum import Enum
+import enum
 from collections import namedtuple
 import heapq
 import itertools
@@ -109,7 +109,7 @@ class SteeringIdentification(object):
             score))
 
 
-class EventType(Enum):
+class EventType(enum.Enum):
     Braking = 0
     Overtaking = 1
 
@@ -1294,3 +1294,181 @@ def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
         if z is not None:
             z[mask] = np.ma.masked
     return mask
+
+
+import bisect
+#import enum
+#import numpy as np
+#import scipy.signal
+
+def find_steering_region(event, ax=None):
+    class Extremum(enum.Enum):
+        MINIMUM = -1
+        INFLECT = 0
+        MAXIMUM = 1
+
+        def __str__(self):
+            return self.name
+
+    class ExtremumPoint(object):
+        def __init__(self, event_index, extremum, x, y):
+            self.index = event_index
+            self.extremum = extremum
+            self.x = x
+            self.y = y
+
+        def __eq__(self, other):
+            # order by x-coordinate
+            # This assumes two different extrema cannot have the same
+            # x-coordinate.
+            return self.x == other.x
+
+        def __lt__(self, other):
+            # order by x-coordinate
+            return self.x < other.x
+
+        def __str__(self):
+            msg = '[{}, {}, ({:0.3f}, {:0.3f})]'.format(
+                    self.index, self.extremum, self.x, self.y)
+            return msg
+
+        __repr__ = __str__
+
+    # get kalman estimate trajectory
+    x, y = np.squeeze(event.kalman_smoothed_result.state_estimate[:, :2]).T
+
+    # smooth y-coordinate and get local extrema
+    fy = scipy.signal.savgol_filter(y, 51, 3)
+    maxima_index = scipy.signal.argrelmax(fy)[0]
+    minima_index = scipy.signal.argrelmin(fy)[0]
+
+    # smooth dy and get inflection points
+    dy = scipy.signal.savgol_filter(np.diff(y), 85, 3)
+    inflec_index = np.concatenate((
+        scipy.signal.argrelmax(dy)[0],
+        scipy.signal.argrelmin(dy)[0]))
+
+    # Create lists of ExtremumPoints for minima, maxima, inflection points and
+    # then combine into a single sorted list. The y-coordinate is the Kalman
+    # estimate trajectory instead of the smoothed one used for extremum
+    # detection.
+    maxima = [ExtremumPoint(i, Extremum.MAXIMUM, x[i], y[i])
+              for i in maxima_index]
+    minima = [ExtremumPoint(i, Extremum.MINIMUM, x[i], y[i])
+              for i in minima_index]
+    inflec = [ExtremumPoint(i, Extremum.INFLECT, x[i], y[i])
+              for i in inflec_index]
+    points = maxima + minima + inflec
+    points.sort()
+    #print(points)
+
+    # Find start by searching for the first maximum to the right (+x direction)
+    # of the obstacle centroid.
+    obstacle = ExtremumPoint(None, None, -3, None) # FIXME don't define obstacle
+                                                   # centroid position here
+    i = bisect.bisect_right(points, obstacle)
+    #print(i)
+
+    def argfind(points, extremum_type, start_index=None, stop_index=None,
+                reverse=False):
+        if start_index is None:
+            offset = 0
+        else:
+            offset = start_index
+
+        iterator = enumerate(points[start_index:stop_index])
+        if reverse:
+            iterator = reversed(list(iterator))
+        for i, p in iterator:
+            if p.extremum == extremum_type:
+                return i + offset
+        raise ValueError
+
+    arg_max = argfind(points, Extremum.MAXIMUM, start_index=i)
+    #print('first maximum, event start')
+    #print(arg_max, points[arg_max])
+
+    arg_min = argfind(points, Extremum.MINIMUM, stop_index=arg_max,
+                      reverse=True)
+    #print('first minimum, event apex')
+    #print(arg_min, points[arg_min])
+
+    #print('corresponding trajectory point, event stop')
+    #print('arg min index', points[arg_min].index)
+    #print('total size', len(x))
+    # as index in y array increases, cyclist moves to the left (-x direction)
+    index_end = (points[arg_min].index - 1 +
+                 np.searchsorted(y[points[arg_min].index:],
+                                 points[arg_max].y))
+
+    #print('({:0.3f}, {:0.3f})'.format(x[index_end], y[index_end]))
+
+    index_start = points[arg_max].index
+    event_slice = slice(index_start, index_end)
+
+    if ax is not None:
+        colors = sns.color_palette('tab10', 10)
+
+        # plot trajectory, dy
+        ax.plot(x, y, color=colors[0],
+                label='Kalman estimate trajectory')
+        #ax.plot(x[:-1], dy*y.ptp()/dy.ptp() + y.mean(),
+        #        color=colors[2], alpha=0.8,
+        #        label='dy (scaled & shifted)')
+
+        # plot extrema
+        extrema_marker_size = 80
+        ax.scatter(x[maxima_index], y[maxima_index],
+                   label='maxima',
+                   s=extrema_marker_size,
+                   marker='^',
+                   color=colors[1])
+        ax.scatter(x[minima_index], y[minima_index],
+                   label='minima',
+                   s=extrema_marker_size,
+                   marker='v',
+                   color=colors[1])
+        ax.scatter(x[inflec_index], y[inflec_index],
+                   label='inflection points',
+                   s=extrema_marker_size,
+                   marker='d',
+                   color=colors[1])
+
+        # plot event points
+        event_point_marker_size = 150
+        event_point_linewidth = 3
+        ax.scatter(points[arg_max].x, points[arg_max].y,
+                   label='event start',
+                   s=event_point_marker_size,
+                   marker='^',
+                   linewidth=event_point_linewidth,
+                   facecolor='None',
+                   edgecolor=colors[3])
+        ax.scatter(points[arg_min].x, points[arg_min].y,
+                   label='event apex',
+                   s=event_point_marker_size,
+                   marker='v',
+                   linewidth=event_point_linewidth,
+                   facecolor='None',
+                   edgecolor=colors[3])
+        ax.scatter(x[index_end], y[index_end],
+                   label='event end',
+                   s=event_point_marker_size,
+                   marker='o',
+                   linewidth=event_point_linewidth,
+                   facecolor='None',
+                   edgecolor=colors[3])
+
+        # plot event regions
+        ax.axvspan(x[event.steer_slice.stop],
+                   x[event.steer_slice.start],
+                   label='overtaking event region (steer angle)',
+                   color=colors[3], alpha=0.1)
+        ax.axvspan(x[index_end],
+                   x[index_start],
+                   label='overtaking event region (trajectory)',
+                   hatch='X', fill=False,
+                   color=colors[3], alpha=0.3)
+
+        ax.legend()
+    return event_slice
