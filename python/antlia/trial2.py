@@ -85,6 +85,7 @@ VALID_BB = {
     'xlim': (-20, 60),
     'ylim': (1.0, 3.5)
 }
+OBSTACLE_POINT = (-3.66, 3.06)
 
 
 class SteeringIdentification(object):
