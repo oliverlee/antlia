@@ -1472,3 +1472,34 @@ def find_steering_region(event, ax=None):
 
         ax.legend()
     return event_slice
+
+
+import scipy.optimize
+
+
+def fit_steering_model(event, event_slice, ax=None, **plot_kw):
+    x, y = np.squeeze(event.kalman_smoothed_result.state_estimate[:, :2]).T
+    x_ = x[event_slice]
+    y_ = y[event_slice]
+
+    def gauss(x, *params):
+        amplitude, mu, sigma, offset = params
+        return amplitude*np.exp(-(x-mu)**2/(2*sigma**2)) + offset
+
+    # FIXME don't define obstacle centroid position here
+    initial_guess = [-y_.ptp(), x_[np.argmin(y_)], x_.ptp()/2, 3.1]
+    params, _ = scipy.optimize.curve_fit(gauss, x_, y_, p0=initial_guess)
+
+    if ax is not None:
+        colors = sns.color_palette('tab10', 10)
+        if plot_kw:
+            ax.plot(x_, gauss(x_, *params),
+                    **plot_kw)
+        else:
+            ax.plot(x_, gauss(x_, *params),
+                    label='gaussian fit',
+                    color=colors[0],
+                    linestyle='--')
+        ax.legend()
+
+    return params
