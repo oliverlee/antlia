@@ -362,7 +362,7 @@ class Event(Trial):
         self.stationary_count = stationary_count
 
     @staticmethod
-    def _set_radius_mask(X, radius=1.5):
+    def _set_radius_mask(X, radius=1.0):
         """Sets the mask of X to invalidate points far from the cluster
         centroid, where X contains the points for a single lidar frame.
 
@@ -1122,7 +1122,7 @@ def find_steering_region(event, event_triple=False, ax=None):
         scipy.signal.argrelmax(dy)[0],
         scipy.signal.argrelmin(dy)[0]))
 
-    if not maxima_index:
+    if maxima_index.size == 0:
         # try finding maxima using the double derivative of y
         ddy = scipy.signal.savgol_filter(np.diff(dy), 125, 3)
 
@@ -1291,5 +1291,4 @@ def fit_steering_model(event, event_slice, ax=None, **plot_kw):
                     color=colors[0],
                     linestyle='--')
         ax.legend()
-
     return params
