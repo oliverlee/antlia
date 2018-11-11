@@ -1073,7 +1073,7 @@ def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
     return mask
 
 
-def find_steering_region(event, event_triple=False, ax=None):
+def find_steering_region(event, event_triple=False, ax=None, obstacle_origin=False):
     EventTriple = namedtuple('EventTriple',
                              ['start', 'apex', 'end'])
     class Extremum(enum.Enum):
@@ -1201,59 +1201,75 @@ def find_steering_region(event, event_triple=False, ax=None):
     if ax is not None:
         colors = sns.color_palette('tab10', 10)
 
+        if obstacle_origin:
+            x0 = -OBSTACLE_POINT[0]
+            y0 = -OBSTACLE_POINT[1]
+        else:
+            x0 = 0
+            y0 = 0
+
         # plot trajectory, dy
-        ax.plot(x, y, color=colors[0],
+        ax.plot(x + x0,
+                y + y0,
+                color=colors[0],
                 label='Kalman estimate trajectory')
-        ax.plot(x[:-1], dy*y.ptp()/dy.ptp() + y.mean(),
-                color=colors[2], alpha=0.8,
-                label='dy (scaled & shifted)')
+        #ax.plot(x[:-1] + x0,
+        #        dy*y.ptp()/dy.ptp() + y.mean() + y0,
+        #        color=colors[2], alpha=0.8,
+        #        label='dy (scaled & shifted)')
 
         # plot extrema
         extrema_marker_size = 80
-        ax.scatter(x[maxima_index], y[maxima_index],
+        ax.scatter(x[maxima_index] + x0,
+                   y[maxima_index] + y0,
                    label='maxima',
                    s=extrema_marker_size,
                    marker='^',
                    color=colors[1])
-        ax.scatter(x[minima_index], y[minima_index],
+        ax.scatter(x[minima_index] + x0,
+                   y[minima_index] + y0,
                    label='minima',
                    s=extrema_marker_size,
                    marker='v',
                    color=colors[1])
-        ax.scatter(x[inflec_index], y[inflec_index],
-                   label='inflection points',
-                   s=extrema_marker_size,
-                   marker='d',
-                   color=colors[1])
+        #ax.scatter(x[inflec_index] + x0,
+        #           y[inflec_index] + y0,
+        #           label='inflection points',
+        #           s=extrema_marker_size,
+        #           marker='d',
+        #           color=colors[1])
 
         # plot event points
         event_point_marker_size = 150
         event_point_linewidth = 3
-        ax.scatter(points[arg_max].x, points[arg_max].y,
+        ax.scatter(points[arg_max].x + x0,
+                   points[arg_max].y + y0,
                    label='event start',
                    s=event_point_marker_size,
                    marker='^',
                    linewidth=event_point_linewidth,
                    facecolor='None',
                    edgecolor=colors[3])
-        ax.scatter(points[arg_min].x, points[arg_min].y,
-                   label='event apex',
-                   s=event_point_marker_size,
-                   marker='v',
-                   linewidth=event_point_linewidth,
-                   facecolor='None',
-                   edgecolor=colors[3])
-        ax.scatter(x[index_end], y[index_end],
+        #ax.scatter(points[arg_min].x + x0,
+        #           points[arg_min].y + y0,
+        #           label='event apex',
+        #           s=event_point_marker_size,
+        #           marker='v',
+        #           linewidth=event_point_linewidth,
+        #           facecolor='None',
+        #           edgecolor=colors[3])
+        ax.scatter(x[index_end] + x0,
+                   y[index_end] + y0,
                    label='event end',
                    s=event_point_marker_size,
-                   marker='o',
+                   marker='s',
                    linewidth=event_point_linewidth,
                    facecolor='None',
                    edgecolor=colors[3])
 
         # plot event regions
-        ax.axvspan(x[index_end],
-                   x[index_start],
+        ax.axvspan(x[index_end] + x0,
+                   x[index_start] + x0,
                    label='overtaking event region (trajectory)',
                    hatch='X', fill=False,
                    color=colors[3], alpha=0.3)
@@ -1265,7 +1281,11 @@ def find_steering_region(event, event_triple=False, ax=None):
     return slice(index_start, index_end)
 
 
-def fit_steering_model(event, event_slice, ax=None, **plot_kw):
+def fit_steering_model(event,
+                       event_slice,
+                       ax=None,
+                       obstacle_origin=False,
+                       **plot_kw):
     x, y = event.trajectory(mode='kalman')
     x_ = x[event_slice]
     y_ = y[event_slice]
@@ -1281,12 +1301,21 @@ def fit_steering_model(event, event_slice, ax=None, **plot_kw):
     params, _ = scipy.optimize.curve_fit(gauss, x_, y_, p0=initial_guess)
 
     if ax is not None:
+        if obstacle_origin:
+            x0 = -OBSTACLE_POINT[0]
+            y0 = -OBSTACLE_POINT[1]
+        else:
+            x0 = 0
+            y0 = 0
+
         colors = sns.color_palette('tab10', 10)
         if plot_kw:
-            ax.plot(x_, gauss(x_, *params),
+            ax.plot(x_ + x0,
+                    gauss(x_, *params) + y0,
                     **plot_kw)
         else:
-            ax.plot(x_, gauss(x_, *params),
+            ax.plot(x_ + x0,
+                    gauss(x_, *params) + y0,
                     label='gaussian fit',
                     color=colors[0],
                     linestyle='--')
