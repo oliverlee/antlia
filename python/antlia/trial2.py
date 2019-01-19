@@ -1073,7 +1073,8 @@ def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
     return mask
 
 
-def find_steering_region(event, event_triple=False, ax=None, obstacle_origin=False):
+def find_steering_region(event, event_triple=False, ax=None,
+                         obstacle_origin=False, markers=None):
     EventTriple = namedtuple('EventTriple',
                              ['start', 'apex', 'end'])
     class Extremum(enum.Enum):
@@ -1218,19 +1219,23 @@ def find_steering_region(event, event_triple=False, ax=None, obstacle_origin=Fal
         #        color=colors[2], alpha=0.8,
         #        label='dy (scaled & shifted)')
 
+        # maxima, minima, start, end markers
+        if markers is None:
+            markers = ['^', 'v', '^', 's']
+
         # plot extrema
         extrema_marker_size = 80
         ax.scatter(x[maxima_index] + x0,
                    y[maxima_index] + y0,
                    label='maxima',
                    s=extrema_marker_size,
-                   marker='^',
+                   marker=markers[0],
                    color=colors[1])
         ax.scatter(x[minima_index] + x0,
                    y[minima_index] + y0,
                    label='minima',
                    s=extrema_marker_size,
-                   marker='v',
+                   marker=markers[1],
                    color=colors[1])
         #ax.scatter(x[inflec_index] + x0,
         #           y[inflec_index] + y0,
@@ -1246,7 +1251,7 @@ def find_steering_region(event, event_triple=False, ax=None, obstacle_origin=Fal
                    points[arg_max].y + y0,
                    label='event start',
                    s=event_point_marker_size,
-                   marker='^',
+                   marker=markers[2],
                    linewidth=event_point_linewidth,
                    facecolor='None',
                    edgecolor=colors[3])
@@ -1262,7 +1267,7 @@ def find_steering_region(event, event_triple=False, ax=None, obstacle_origin=Fal
                    y[index_end] + y0,
                    label='event end',
                    s=event_point_marker_size,
-                   marker='s',
+                   marker=markers[3],
                    linewidth=event_point_linewidth,
                    facecolor='None',
                    edgecolor=colors[3])
