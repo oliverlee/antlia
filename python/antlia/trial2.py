@@ -433,7 +433,7 @@ class Event(Trial):
                 y[lidar_index].compressed())).T)
         return X
 
-    def _calculate_dtc(self, lidar_index):
+    def _calculate_dtc(self, lidar_index, lateral_clearance=False):
         """Calculate the distance between the bicycle and obstacle at lidar
         index. Returns the calculated distance, bicycle points, and stationary
         points.
@@ -446,15 +446,33 @@ class Event(Trial):
         Y = self._compressed_points(lidar_index, True)
         size_y = Y.count()
 
-        # if the difference in sets is greater than 20% of the sum of both sets,
-        # probably some errors with clustering
-        if abs(size_x - size_y) > 0.2*(size_x + size_y):
-            msg = 'Difference in size of bicycle and obstacle cluster '
-            msg += 'exceeds 20% of the total set size.\n'
-            msg += 'Clustering recomputed with k-means.'
-            warnings.warn(msg, UserWarning)
+        if not lateral_clearance:
+            # if the difference in sets is greater than 20% of the sum of both
+            # sets, probably some errors with clustering
+            if abs(size_x - size_y) > 0.2*(size_x + size_y):
+                msg = 'Difference in size of bicycle and obstacle cluster '
+                msg += 'exceeds 20% of the total set size.\n'
+                msg += 'Clustering recomputed with k-means.'
+                warnings.warn(msg, UserWarning)
 
-            X, Y = dtc.cluster(*np.concatenate((X, Y)).T)
+                X, Y = dtc.cluster(*np.concatenate((X, Y)).T)
+        else:
+            if size_x/size_y > 2:
+                msg = 'Difference in size of bicycle cluster exceeds obstacle '
+                msg += 'by more than 2x.\n'
+                msg += 'Clustering recomputed with k-means.'
+                warnings.warn(msg, UserWarning)
+
+                # mask values with positive x values
+                X[X[:, 0] > 0, :] = np.ma.masked
+                Y[Y[:, 0] > 0, :] = np.ma.masked
+
+                init = np.vstack((X.mean(axis=0), Y.mean(axis=0)))
+                init[0, 1] -= 0.1
+                init[1, 1] += 0.1
+
+                X, Y = dtc.cluster(*np.concatenate((X, Y)).T,
+                                   initial_guess=init)
 
         # exclude bicycle noise
         self._set_radius_mask(X)
@@ -464,12 +482,18 @@ class Event(Trial):
         self._set_radius_mask(Y)
 
         # get closest pair and perform distance calculation
-        pair = dtc.bcp(X, Y)
+        pair = dtc.bcp(X, Y, lateral_calc=lateral_clearance)
         dist = dtc.dist(*pair)
+
+        print('_calculate_dtc({}, {}, {}) = {:0.3f}'.format(
+            hex(id(self)), lidar_index, lateral_clearance, dist))
+        print(' size x {}, size y {}'.format(size_x, size_y))
         return dist, pair, X, Y
 
-    def _plot_closest_pair(self, lidar_index, ax=None, **fig_kw):
-        _, pair, X, Y = self._calculate_dtc(lidar_index)
+    def _plot_closest_pair(self, lidar_index, ax=None,
+                          lateral_clearance=False, **fig_kw):
+        _, pair, X, Y = self._calculate_dtc(lidar_index,
+                                            lateral_clearance=lateral_clearance)
 
         if ax is None:
             fig, ax = plt.subplots(**fig_kw)
@@ -489,7 +513,7 @@ class Event(Trial):
 
         return fig, ax
 
-    def calculate_dtc(self, timestamp):
+    def calculate_dtc(self, timestamp, lateral=False):
         """Return the distance between the bicycle and obstacle at timestamp.
         """
         assert timestamp >= self.bicycle.time[0]
@@ -519,7 +543,7 @@ class Event(Trial):
         distances = []
         for j in [i - 1, i]:
             times.append(self.lidar.time[j][0])
-            distances.append(self._calculate_dtc(j)[0])
+            distances.append(self._calculate_dtc(j, lateral)[0])
 
         return np.interp(timestamp, times, distances)
 

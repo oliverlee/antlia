@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import queue
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -17,13 +18,32 @@ def dist(a, b=None):
     return np.sqrt((ax - bx)**2 + (ay - by)**2)
 
 
-def bcp(cluster_a, cluster_b):
+def bcp(cluster_a, cluster_b, lateral_calc=False):
     min_dist = np.inf
     pair = None
+
+    # calculate centroid-to-centroid distance
+    a_centroid = cluster_a.mean(axis=0)
+    b_centroid = cluster_b.mean(axis=0)
+    dist_centroid = dist(a_centroid, b_centroid)
 
     for a in cluster_a:
         for b in cluster_b:
             d = dist(a, b)
+
+            # ignore some points if we are calculating lateral clearance
+            if lateral_calc:
+                # ignore if y dist is too small
+                if abs(b[1] - a[1]) <  0.3:
+                    continue
+
+                # ignore if point is too close to the opposite cluster centroid
+                if dist(a, b_centroid) < 0.5:
+                    continue
+
+                # ignore if point is too close to the opposite cluster centroid
+                if dist(b, a_centroid) < 0.5:
+                    continue
 
             if d < min_dist:
                 min_dist = d
@@ -31,7 +51,7 @@ def bcp(cluster_a, cluster_b):
 
     return pair
 
-def cluster(x, y):
+def cluster(x, y, initial_guess=None):
     try:
         x = x.compressed()
         y = y.compressed()
@@ -42,7 +62,11 @@ def cluster(x, y):
     y = np.reshape(y, (-1,))
     X = np.vstack((x, y)).transpose()
 
-    kmeans = KMeans(2).fit(X)
+    if initial_guess is None:
+        init = 'k-means++'
+    else:
+        init = initial_guess
+    kmeans = KMeans(n_clusters=2, init=init).fit(X)
 
     index0 = kmeans.labels_ == 0
     index1 = kmeans.labels_ == 1
