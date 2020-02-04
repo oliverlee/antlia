@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-from enum import Enum
+import bisect
+import enum
 from collections import namedtuple
 import heapq
 import itertools
@@ -9,6 +10,7 @@ import numpy as np
 import scipy.signal
 import scipy.spatial
 import scipy.stats
+import scipy.optimize
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
 import seaborn as sns
@@ -35,11 +37,13 @@ FakeHdb = namedtuple(
         'FakeHdb',
         ['labels_'])
 
+# Leave this defined to load saved data
 SteeringIdentificationCase = namedtuple(
         'SteeringIdentificationCase',
         ['attenuation', 'data', 'freq', 'xf', 'minima', 'maxima', 'inflections',
          'cutoff', 'section', 'score'])
 
+# Leave this defined to load saved data
 SteerEventSinusoidFitParameters = namedtuple(
         'SteerEventSinusoidFitParameters',
         ['amplitude',
@@ -47,6 +51,15 @@ SteerEventSinusoidFitParameters = namedtuple(
          'phase',
          'mean']) # TODO add all information from
                   # steering identification case object?
+SteerEventGaussianFitParameters = namedtuple(
+        'SteerEventGaussianFitParameters',
+        ['index_start',
+         'index_apex',
+         'index_end',
+         'gaussianfit_amplitude',
+         'gaussianfit_mean',
+         'gaussianfit_std',
+         'gaussianfit_offset'])
 
 # braking identification done in a single step
 BrakeEventLinearFitParameters = namedtuple(
@@ -85,8 +98,10 @@ VALID_BB = {
     'xlim': (-20, 60),
     'ylim': (1.0, 3.5)
 }
+OBSTACLE_POINT = (-3.66, 3.06)
 
 
+# Leave this defined to load saved data
 class SteeringIdentification(object):
     def __init__(self, attenuation, pattern):
         self.attenuation = attenuation
@@ -109,7 +124,7 @@ class SteeringIdentification(object):
             score))
 
 
-class EventType(Enum):
+class EventType(enum.Enum):
     Braking = 0
     Overtaking = 1
 
@@ -138,6 +153,7 @@ class Event(Trial):
             self.stationary_count = None
             self._identify_stationary(bbmask=bbmask)
 
+            # Leave this defined to load saved data
             self.si = None
             self.steer_slice = None # bicycle time
             #self._identify_steer_slice() # don't run automatically
@@ -346,7 +362,7 @@ class Event(Trial):
         self.stationary_count = stationary_count
 
     @staticmethod
-    def _set_radius_mask(X, radius=1.5):
+    def _set_radius_mask(X, radius=1.0):
         """Sets the mask of X to invalidate points far from the cluster
         centroid, where X contains the points for a single lidar frame.
 
@@ -359,7 +375,6 @@ class Event(Trial):
             raise TypeError('X.shape must be (n, 2)')
 
         X.mask = np.ma.nomask
-        #centroid = X.mean(axis=0)
         centroid = np.median(X.data, axis=0)
         distances = scipy.spatial.distance.cdist(X, centroid.reshape((1, 2)))
         index = np.matlib.repmat(
@@ -425,9 +440,21 @@ class Event(Trial):
         """
         # bicycle
         X = self._compressed_points(lidar_index, False)
+        size_x = X.count()
 
         # stationary
         Y = self._compressed_points(lidar_index, True)
+        size_y = Y.count()
+
+        # if the difference in sets is greater than 20% of the sum of both sets,
+        # probably some errors with clustering
+        if abs(size_x - size_y) > 0.2*(size_x + size_y):
+            msg = 'Difference in size of bicycle and obstacle cluster '
+            msg += 'exceeds 20% of the total set size.\n'
+            msg += 'Clustering recomputed with k-means.'
+            warnings.warn(msg, UserWarning)
+
+            X, Y = dtc.cluster(*np.concatenate((X, Y)).T)
 
         # exclude bicycle noise
         self._set_radius_mask(X)
@@ -590,147 +617,19 @@ class Event(Trial):
 
         return fig, ax
 
-    def _identify_steer_slice(self, pattern=None, attenuation=None,
-                              min_allowed_freq=0.40):
-        if self.type != EventType.Overtaking:
-            raise TypeError('Incorrect EventType')
-
-        if attenuation is None:
-            attenuation = np.arange(35, 100, 10)
-
-        # create windows of pattern length
-        if pattern is None:
-            test_patterns = [(0, -1, 0, 1, 0, -1, 0),
-                             (0, -1, 0, 1, 0)]
-        else:
-            test_patterns = [pattern]
-
-        # save identification data
-        self.si = SteeringIdentification(attenuation.copy(),
-                                         list(test_patterns))
-
-        best_a = None
-        for a in attenuation:
-            freq, xf = self._chebwin_fft(self.bicycle['steer angle'],
-                                         self.period,
-                                         attenuation=a,
-                                         max_freq=2)
-            minima = scipy.signal.argrelmin(xf)[0]
-            if len(minima) < 2:
-                # Unable to detect minima for this attenuation value
-                continue
-
-            f = freq[minima[[0, 1]]]
-
-            if f[0] > min_allowed_freq:
-                msg = 'First frequency minimum exceeds {}'.format(
-                        min_allowed_freq)
-                msg += ' and has been replaced with 0.1'
-                warnings.warn(msg)
-                f[1] = f[0]
-                f[0] = 0.1
-
-            sa = self._butter_bandpass_filter(self.data['steer angle'],
-                                              f.copy(),
-                                              1/self.period)
-
-            # get max, min, inflection points for bandpass filtered steer angle
-            sa_max = scipy.signal.argrelmax(sa)[0]
-            sa_min = scipy.signal.argrelmin(sa)[0]
-            dsa = np.diff(sa)
-            sa_inf = np.concatenate((scipy.signal.argrelmax(dsa)[0],
-                                     scipy.signal.argrelmin(dsa)[0]))
-
-            # put max, min, inf in index order
-            q = []
-            for item in sa_max:
-                heapq.heappush(q, (item, 1))
-            for item in sa_min:
-                heapq.heappush(q, (item, -1))
-            for item in sa_inf:
-                heapq.heappush(q, (item, 0))
-
-            sorted_q = []
-            while q:
-                sorted_q.append(heapq.heappop(q))
-
-            # reduce runs of 3 to 1 (only happens with inflection points)
-            q = []
-            for item in sorted_q:
-                q.append(item)
-
-                if len(q) > 2:
-                    if q[-1][1] == q[-2][1] == q[-3][1]:
-                        q.pop(-3)
-                        q.pop(-1)
-
-            sections = []
-            # filter sections that match pattern
-            for p in test_patterns:
-                # create window iterator
-                it = itertools.tee(q, len(p))
-                for n, l in enumerate(it):
-                    for _ in range(n):
-                        next(l, None)
-                window = zip(*it)
-
-                # filter pattern
-                for w in window:
-                    w0, w1 = list(zip(*w))
-                    if w1 == p:
-                        sections.append(w0)
-
-            # filter sections that span the width of the obstacle
-            def span_obs(s):
-                t0, t1 = self.bicycle.time[[s[0], s[-1]]]
-                z = self.lidar.cartesianz()[2]
-                z[(z < t0) | (z > t1)] = np.ma.masked
-                z.mask |= self.bb_mask | self.stationary_mask
-                x = np.ma.masked_where(z.mask, self.x, copy=True)
-                xlim = OBSTACLE_BB['xlim']
-                return x.max() > xlim[1] and x.min() < xlim[0]
-            sections = filter(span_obs, sections)
-
-            # define best section to have the longest time duration
-            best_section = None
-            for s in sections:
-                score = s[-1] - s[0]
-                if best_section is None or score > best_section[1]:
-                    best_section = (s, score)
-
-            if best_section is None:
-                # didn't find acceptable section for bandpass attenuation value
-                self.si.add_case(a, sa, freq, xf, sa_min, sa_max, sa_inf, f,
-                                 None, None)
-                continue
-            else:
-                self.si.add_case(a, sa, freq, xf, sa_min, sa_max, sa_inf, f,
-                                 best_section[0], best_section[1])
-
-            if best_a is None or best_section[1] > best_a[1]:
-                best_a = (best_section[0], best_section[1], a)
-
-        msg = 'Unable to determine steering metrics for event'
-        assert best_a is not None, msg
-        self.steer_slice = slice(best_a[0][0], best_a[0][-1] + 1)
-
     def _calculate_steer_event_metrics(self):
-        if self.type != EventType.Overtaking:
+        if self.type.value != EventType.Overtaking.value:
             raise TypeError('Incorrect EventType')
-        if self.si is None:
-            raise ValueError('Steer slice must first be identified')
 
-        case = None
-        for c in self.si.cases:
-            if case is None or c.score > case.score:
-                case = c
-
-        duration = (self.bicycle.time[case.section[-1]] -
-                self.bicycle.time[case.section[0]])
-        amplitude = (case.data[case.section[3]] -
-                case.data[case.section[1]])
-        length = len(case.section)
-        return duration, amplitude, length
+        region = find_steering_region(self, event_triple=True)
+        params = fit_steering_model(self, slice(region.start, region.end))
+        return SteerEventGaussianFitParameters(region.start,
+                                               region.apex,
+                                               region.end,
+                                               params[0],
+                                               params[1],
+                                               params[2],
+                                               params[3])
 
     def _calculate_brake_event_fit(self,
                                    window_size=55,
@@ -802,10 +701,14 @@ class Event(Trial):
                 ax.scatter(X[:, 0], X[:, 1], X[:, 2],
                            marker='.', color=color, alpha=alpha)
 
-
         return fig, ax
 
     def trajectory(self, mode=None, bbmask=None):
+        if mode == 'kalman':
+            x, y = np.squeeze(
+                    self.kalman_smoothed_result.state_estimate[:, :2]).T
+            return x, y
+
         # stationary points
         x = self.x.copy()
         y = self.y.copy()
@@ -967,121 +870,6 @@ class Event(Trial):
 
         return fig, ax
 
-    def plot_steer_identification(self, steerid_kw=None, ax=None, **fig_kw):
-        if self.type != EventType.Overtaking:
-            raise TypeError('Incorrect EventType')
-        if self.si is None:
-            if steerid_kw is None:
-                steerid_kw = {}
-            self._identify_steer_slice(**steerid_kw)
-
-        if ax is None:
-            fig, ax = plt.subplots(4, 1, sharex=False, **fig_kw)
-        else:
-            assert len(ax) == 4
-            fig = ax[0].get_figure()
-
-        n = len(self.si.cases)
-        if n < 11:
-            colors = sns.color_palette('tab10', n)
-        else:
-            colors = sns.husl_palette(n, l=.7)
-
-        lines = []
-        case_1_shift = 0.025
-        case_2_shift = 0.25
-        for i, case in enumerate(self.si.cases):
-            # steer angle fft plot
-            label = 'attenuation = {}'.format(case.attenuation)
-            ax[0].plot(case.freq, case.xf, color=colors[i], label=label)
-
-            minima = scipy.signal.argrelmin(case.xf)[0]
-            ax[0].scatter(case.freq[minima], case.xf[minima],
-                          marker='v', color=colors[i])
-
-            # filtered steer angle plot
-            label += ', fc = [{:0.3f}, {:0.3f}] Hz'.format(*case.freq)
-            if case.score is not None:
-                label += ', span = {}'.format(case.score)
-            lines.extend(ax[1].plot(self.bicycle.time,
-                                    case.data + case_1_shift*(i + 1),
-                                    label=label, color=colors[i]))
-            ax[1].scatter(self.bicycle.time[case.maxima],
-                          case.data[case.maxima] + case_1_shift*(i + 1),
-                          marker='^', color=colors[i])
-            ax[1].scatter(self.bicycle.time[case.minima],
-                          case.data[case.minima] + case_1_shift*(i + 1),
-                          marker='v', color=colors[i])
-            ax[1].scatter(self.bicycle.time[case.inflections],
-                          case.data[case.inflections] + case_1_shift*(i + 1),
-                          marker='d', color=colors[i])
-
-            try:
-                t0, t1 = self.bicycle.time[[case.section[0], case.section[-1]]]
-            except IndexError:
-                pass
-            else:
-                ax[1].axvspan(t0, t1, alpha=0.1, color=colors[i])
-
-                # trajectory scatter plot
-                z = self.lidar.cartesianz()[2]
-                z[(z < t0) | (z > t1)] = np.ma.masked
-                z.mask |= self.bb_mask | self.stationary_mask
-                x = np.ma.masked_where(z.mask, self.x, copy=True)
-                y = np.ma.masked_where(z.mask, self.y, copy=True)
-                ax[2].scatter(x, y + case_2_shift*(i + 1),
-                              marker='.', color=colors[i], alpha=0.1)
-
-        best_score = None
-        for i, case in enumerate(self.si.cases):
-            if best_score is None or case.score > best_score[0]:
-                best_score = (case.score, i)
-        lines[best_score[1]].set_linewidth(3)
-
-        ax[0].set_title('steer angle FFT chebwin window')
-        ax[0].set_xlabel('frequency [Hz]')
-        ax[0].set_ylabel('amplitude')
-        ax[0].legend(loc='upper right')
-        ax[0].set_ylim((-0.001, 0.02))
-
-        sa_raw = self.bicycle['steer angle'].copy()
-        sa_raw -= sa_raw.mean()
-        ax[1].plot(self.bicycle.time, sa_raw,
-                   label='measured steer angle (mean subtracted)',
-                   color='black', alpha=0.5, zorder=-1)
-        ax[1].set_title('filtered steer angle')
-        ax[1].set_xlabel('time [s]')
-        ax[1].set_ylabel('steer angle (case shifted) [rad]')
-        ax[1].legend(loc='upper left')
-
-        ax[2].scatter(self.x, self.y,
-                      marker='.', color='black', alpha=0.11,
-                      zorder=-1)
-        ax[2].set_title('lidar scans (section bounds)')
-        ax[2].set_xlabel('x-coordinate [m]')
-        ax[2].set_ylabel('y-coordinate [m]')
-
-        # add 3d cluster scatter plot
-        ax[3].get_xaxis().set_visible(False)
-        ax[3].get_yaxis().set_visible(False)
-        ax[3] = fig.add_subplot(4, 1, 4, projection='3d')
-        self.plot_clusters(ax=ax[3])
-
-        z0 = self.z.min()
-        z1 = self.z.max()
-        t0 = self.lidar.time[0]
-        t1 = self.lidar.time[-1]
-
-        tstart = self.bicycle.time[self.si.cases[best_score[1]].section[0]]
-        tstop = self.bicycle.time[self.si.cases[best_score[1]].section[-1]]
-        zstart, zstop = np.interp([tstart, tstop], [t0, t1], [z0, z1])
-        index = (self.z < zstart) | (self.z > zstop)
-        x = np.ma.masked_where(index, self.x, copy=True)
-        y = np.ma.masked_where(index, self.y, copy=True)
-        z = np.ma.masked_where(index, self.z, copy=True)
-        ax[3].scatter(x, y, z, s=10, color=colors[best_score[1]], alpha=0.5)
-
-        return fig, ax
 
 
 class Trial2(Trial):
@@ -1283,3 +1071,253 @@ def _apply_bbmask(bounding_box, x, y, z=None, apply_mask=True):
         if z is not None:
             z[mask] = np.ma.masked
     return mask
+
+
+def find_steering_region(event, event_triple=False, ax=None, obstacle_origin=False):
+    EventTriple = namedtuple('EventTriple',
+                             ['start', 'apex', 'end'])
+    class Extremum(enum.Enum):
+        MINIMUM = -1
+        INFLECT = 0
+        MAXIMUM = 1
+
+        def __str__(self):
+            return self.name
+
+    class ExtremumPoint(object):
+        def __init__(self, event_index, extremum, x, y):
+            self.index = event_index
+            self.extremum = extremum
+            self.x = x
+            self.y = y
+
+        def __eq__(self, other):
+            # order by x-coordinate
+            # This assumes two different extrema cannot have the same
+            # x-coordinate.
+            return self.x == other.x
+
+        def __lt__(self, other):
+            # order by x-coordinate
+            return self.x < other.x
+
+        def __str__(self):
+            msg = '[{}, {}, ({:0.3f}, {:0.3f})]'.format(
+                    self.index, self.extremum, self.x, self.y)
+            return msg
+
+        __repr__ = __str__
+
+    # get kalman estimate trajectory
+    x, y = event.trajectory(mode='kalman')
+
+    # smooth y-coordinate and get local extrema
+    fy = scipy.signal.savgol_filter(y, 51, 3)
+    maxima_index = scipy.signal.argrelmax(fy)[0]
+    minima_index = scipy.signal.argrelmin(fy)[0]
+
+    # smooth dy and get inflection points
+    dy = scipy.signal.savgol_filter(np.diff(y), 85, 3)
+    inflec_index = np.concatenate((
+        scipy.signal.argrelmax(dy)[0],
+        scipy.signal.argrelmin(dy)[0]))
+
+    if maxima_index.size == 0:
+        # try finding maxima using the double derivative of y
+        ddy = scipy.signal.savgol_filter(np.diff(dy), 125, 3)
+
+        # require height limit as the double derivative is more sensitive
+        maxima_index = scipy.signal.argrelmin(ddy)[0]
+        ddy_ptp = ddy.ptp()
+        maxima_index = np.array([elem for elem in maxima_index
+                                 if ddy[elem] < -ddy_ptp/10])
+
+        if ax is not None:
+            colors = sns.color_palette('tab10', 10)
+            ax.plot(x[:-2], ddy*y.ptp()/ddy_ptp + y.mean(),
+                    label='ddy (scaled & shifted)',
+                    color=colors[7])
+            ax.axhline(y.mean())
+
+    # Create lists of ExtremumPoints for minima, maxima, inflection points and
+    # then combine into a single sorted list. The y-coordinate is the Kalman
+    # estimate trajectory instead of the smoothed one used for extremum
+    # detection.
+    maxima = [ExtremumPoint(i, Extremum.MAXIMUM, x[i], y[i])
+              for i in maxima_index]
+    minima = [ExtremumPoint(i, Extremum.MINIMUM, x[i], y[i])
+              for i in minima_index]
+    inflec = [ExtremumPoint(i, Extremum.INFLECT, x[i], y[i])
+              for i in inflec_index]
+    points = maxima + minima + inflec
+    points.sort()
+    #print(points)
+
+    # Find start by searching for the first maximum to the right (+x direction)
+    # of the obstacle centroid.
+    obstacle = ExtremumPoint(None,
+                             None,
+                             OBSTACLE_POINT[0],
+                             None)
+    i = bisect.bisect_right(points, obstacle)
+    #print(i)
+
+    def argfind(points, extremum_type, start_index=None, stop_index=None,
+                reverse=False):
+        if start_index is None:
+            offset = 0
+        else:
+            offset = start_index
+
+        iterator = enumerate(points[start_index:stop_index])
+        if reverse:
+            iterator = reversed(list(iterator))
+        for i, p in iterator:
+            if p.extremum == extremum_type:
+                return i + offset
+        raise ValueError
+
+    arg_max = argfind(points, Extremum.MAXIMUM, start_index=i)
+    #print('first maximum, event start')
+    #print(arg_max, points[arg_max])
+
+    arg_min = argfind(points, Extremum.MINIMUM, stop_index=arg_max,
+                      reverse=True)
+    #print('first minimum, event apex')
+    #print(arg_min, points[arg_min])
+
+    #print('corresponding trajectory point, event stop')
+    #print('arg min index', points[arg_min].index)
+    #print('total size', len(x))
+    # as index in y array increases, cyclist moves to the left (-x direction)
+    index_end = (points[arg_min].index - 1 +
+                 np.searchsorted(y[points[arg_min].index:],
+                                 points[arg_max].y))
+
+    #print('({:0.3f}, {:0.3f})'.format(x[index_end], y[index_end]))
+
+    index_start = points[arg_max].index
+
+    if ax is not None:
+        colors = sns.color_palette('tab10', 10)
+
+        if obstacle_origin:
+            x0 = -OBSTACLE_POINT[0]
+            y0 = -OBSTACLE_POINT[1]
+        else:
+            x0 = 0
+            y0 = 0
+
+        # plot trajectory, dy
+        ax.plot(x + x0,
+                y + y0,
+                color=colors[0],
+                label='Kalman estimate trajectory')
+        #ax.plot(x[:-1] + x0,
+        #        dy*y.ptp()/dy.ptp() + y.mean() + y0,
+        #        color=colors[2], alpha=0.8,
+        #        label='dy (scaled & shifted)')
+
+        # plot extrema
+        extrema_marker_size = 80
+        ax.scatter(x[maxima_index] + x0,
+                   y[maxima_index] + y0,
+                   label='maxima',
+                   s=extrema_marker_size,
+                   marker='^',
+                   color=colors[1])
+        ax.scatter(x[minima_index] + x0,
+                   y[minima_index] + y0,
+                   label='minima',
+                   s=extrema_marker_size,
+                   marker='v',
+                   color=colors[1])
+        #ax.scatter(x[inflec_index] + x0,
+        #           y[inflec_index] + y0,
+        #           label='inflection points',
+        #           s=extrema_marker_size,
+        #           marker='d',
+        #           color=colors[1])
+
+        # plot event points
+        event_point_marker_size = 150
+        event_point_linewidth = 3
+        ax.scatter(points[arg_max].x + x0,
+                   points[arg_max].y + y0,
+                   label='event start',
+                   s=event_point_marker_size,
+                   marker='^',
+                   linewidth=event_point_linewidth,
+                   facecolor='None',
+                   edgecolor=colors[3])
+        #ax.scatter(points[arg_min].x + x0,
+        #           points[arg_min].y + y0,
+        #           label='event apex',
+        #           s=event_point_marker_size,
+        #           marker='v',
+        #           linewidth=event_point_linewidth,
+        #           facecolor='None',
+        #           edgecolor=colors[3])
+        ax.scatter(x[index_end] + x0,
+                   y[index_end] + y0,
+                   label='event end',
+                   s=event_point_marker_size,
+                   marker='s',
+                   linewidth=event_point_linewidth,
+                   facecolor='None',
+                   edgecolor=colors[3])
+
+        # plot event regions
+        ax.axvspan(x[index_end] + x0,
+                   x[index_start] + x0,
+                   label='overtaking event region (trajectory)',
+                   hatch='X', fill=False,
+                   color=colors[3], alpha=0.3)
+
+        ax.legend()
+
+    if event_triple:
+        return EventTriple(index_start, points[arg_min].index,index_end)
+    return slice(index_start, index_end)
+
+
+def fit_steering_model(event,
+                       event_slice,
+                       ax=None,
+                       obstacle_origin=False,
+                       **plot_kw):
+    x, y = event.trajectory(mode='kalman')
+    x_ = x[event_slice]
+    y_ = y[event_slice]
+
+    def gauss(x, *params):
+        amplitude, mu, sigma, offset = params
+        return amplitude*np.exp(-(x-mu)**2/(2*sigma**2)) + offset
+
+    initial_guess = [-y_.ptp(),
+                     x_[np.argmin(y_)],
+                     x_.ptp()/3,
+                     OBSTACLE_POINT[1]]
+    params, _ = scipy.optimize.curve_fit(gauss, x_, y_, p0=initial_guess)
+
+    if ax is not None:
+        if obstacle_origin:
+            x0 = -OBSTACLE_POINT[0]
+            y0 = -OBSTACLE_POINT[1]
+        else:
+            x0 = 0
+            y0 = 0
+
+        colors = sns.color_palette('tab10', 10)
+        if plot_kw:
+            ax.plot(x_ + x0,
+                    gauss(x_, *params) + y0,
+                    **plot_kw)
+        else:
+            ax.plot(x_ + x0,
+                    gauss(x_, *params) + y0,
+                    label='gaussian fit',
+                    color=colors[0],
+                    linestyle='--')
+        ax.legend()
+    return params

@@ -35,7 +35,7 @@ def cluster(x, y):
     try:
         x = x.compressed()
         y = y.compressed()
-    except AttributeErro:
+    except AttributeError:
         pass
 
     x = np.reshape(x, (-1,))
@@ -52,8 +52,8 @@ def cluster(x, y):
         index0 = kmeans.labels_ == 1
         index1 = kmeans.labels_ == 0
 
-    cluster_a = list(zip(x[index0], y[index0]))
-    cluster_b = list(zip(x[index1], y[index1]))
+    cluster_a = np.ma.array(list(zip(x[index0], y[index0])))
+    cluster_b = np.ma.array(list(zip(x[index1], y[index1])))
     return cluster_a, cluster_b
 
 def plot_closest_pair(cluster_a, cluster_b,
